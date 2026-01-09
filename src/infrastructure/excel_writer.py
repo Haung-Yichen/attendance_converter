@@ -322,20 +322,34 @@ class ExcelWriter:
                     self._apply_absent_color(out_cell)
             
             # Generate remarks based on status (only for work days)
-            remark_items = []
+            late_count = 0
+            early_count = 0
+            overtime_count = 0
+            
             for day in work_days:
                 record = records_by_day.get(day)
                 if not record:
                     continue
+                
                 if record.status == AttendanceStatus.LATE:
-                    remark_items.append(f"{record.date.day}日遲到")
+                    late_count += 1
                 elif record.status == AttendanceStatus.EARLY_LEAVE:
-                    remark_items.append(f"{record.date.day}日早退")
+                    early_count += 1
+                
                 if record.check_out and record.remark == "下班延遲打卡":
-                    remark_items.append(f"{record.date.day}日下班延遲打卡")
+                    overtime_count += 1
+            
+            # Construct remarks string
+            remark_parts = []
+            if late_count > 0:
+                remark_parts.append(f"遲到{late_count}天")
+            if early_count > 0:
+                remark_parts.append(f"早退{early_count}天")
+            if overtime_count > 0:
+                remark_parts.append(f"超時打卡{overtime_count}天")
             
             # Remarks cell
-            remark_cell = ws.cell(in_row, remarks_col, ", ".join(remark_items) if remark_items else "")
+            remark_cell = ws.cell(in_row, remarks_col, ", ".join(remark_parts))
             remark_cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
             remark_cell.border = self.BORDER
             ws.cell(out_row, remarks_col).border = self.BORDER

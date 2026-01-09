@@ -189,11 +189,12 @@ class ExternalAttendanceStrategy(AttendanceStrategy):
         in_end = parse_time(time_rule.in_end)
         
         is_late = record.check_in is not None and record.check_in > in_end
-        is_post_noon = record.check_out is not None and record.check_out > self.NOON
         
-        if is_post_noon:
-            return AttendanceStatus.ABNORMAL
-        elif is_late:
+        # User requested modification: Post-noon is NOT abnormal, just delayed (remark)
+        # is_post_noon = record.check_out is not None and record.check_out > self.NOON
+        # if is_post_noon: return AttendanceStatus.ABNORMAL
+        
+        if is_late:
             return AttendanceStatus.LATE
         else:
             return AttendanceStatus.NORMAL
@@ -221,16 +222,13 @@ class ExternalAttendanceStrategy(AttendanceStrategy):
                 if color_logic.red_abnormal_in:
                     in_color = 'red'
         
-        # Check-out color - special rule for external staff
+        # Check-out color - modified logic
+        # Post-noon is now considered NORMAL (Delayed), so use Green/Normal logic
         if record.check_out is not None:
-            if record.check_out <= self.NOON:
-                # Before noon = normal for external staff
-                if color_logic.green_normal_out:
-                    out_color = 'green'
-            else:
-                # After noon = abnormal for external staff
-                if color_logic.red_abnormal_out:
-                    out_color = 'red'
+            # Always apply normal color logic unless user wants special handling for overtime
+            # Since "Delayed Check-out" for internal is usually Green, we do same here
+            if color_logic.green_normal_out:
+                out_color = 'green'
         
         return (in_color, out_color)
     

@@ -21,8 +21,11 @@ from ui.styles import ThemeManager
 from PyQt6.QtGui import QAction, QActionGroup, QFont
 
 from config.config_manager import ConfigManager, AppConfig, TimeRule, ColorLogic, OutputSettings
-from domain.entities import MonthlyStats
+from domain.entities import MonthlyStats, StaffType
+from domain.staff_classifier import StaffClassifier
 from infrastructure.filename_parser import FilenameParser
+from infrastructure.excel_parser import ExcelFormatError, UnclassifiedStaffError
+from application.report_service import AttendanceReportService, ReportGenerationParams
 
 
 class MainWindow(QMainWindow):
@@ -635,7 +638,7 @@ class MainWindow(QMainWindow):
         """Handle convert button - generate report.
         
         Acts as the Controller: validates pre-conditions, coordinates the 
-        report generation, and displays appropriate feedback to the user.
+        report generation via AttendanceReportService, and displays feedback.
         """
         # Pre-condition Check 1: Source file
         source_path = self.config.paths.last_source_file
@@ -658,7 +661,6 @@ class MainWindow(QMainWindow):
             return
         
         # Parse date from source filename to format output path
-        from infrastructure.filename_parser import FilenameParser
         year_month = FilenameParser.try_parse_report_date(Path(source_path).name)
         
         if year_month:
@@ -692,10 +694,18 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            skipped_names = self._generate_report(Path(source_path), Path(output_path))
+            # Use Application Service for report generation
+            service = AttendanceReportService()
+            params = AttendanceReportService.build_params_from_config(
+                self.config,
+                Path(source_path),
+                Path(output_path),
+                generate_pdf=self.chk_generate_pdf.isChecked()
+            )
+            result = service.generate_report(params)
             
             # Feedback based on result
-            if not skipped_names:
+            if not result.skipped_names:
                 # Scenario A: Perfect conversion
                 self._show_message_box(
                     "information",
@@ -704,15 +714,59 @@ class MainWindow(QMainWindow):
                 )
             else:
                 # Scenario B: Partial completion with warnings
-                skipped_list = "\n".join(f"• {name}" for name in sorted(skipped_names))
+                skipped_list = "\n".join(f"• {name}" for name in sorted(result.skipped_names))
                 self._show_message_box(
                     "warning",
                     "轉換完成（含警告）",
-                    f"報表已產生，但以下 {len(skipped_names)} 位人員不在人員名單中，已被略過：\n\n"
+                    f"報表已產生，但以下 {len(result.skipped_names)} 位人員不在人員名單中，已被略過：\n\n"
                     f"{skipped_list}\n\n"
                     f"報表位於：\n{output_path}"
                 )
                 
+        except UnclassifiedStaffError as e:
+            # Handle unclassified staff with user interaction
+            # Dialog logic inside _on_convert or helper? Putting it here for direct control.
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("人員未分類")
+            msg_box.setText(f"人員 '{e.staff_name}' 不在人員名單中。")
+            msg_box.setInformativeText("無法繼續轉換。請問該人員屬於哪種類別？")
+            msg_box.setIcon(QMessageBox.Icon.Question)
+            
+            # Custom buttons
+            btn_internal = msg_box.addButton("內勤人員", QMessageBox.ButtonRole.ActionRole)
+            btn_external = msg_box.addButton("外勤人員", QMessageBox.ButtonRole.ActionRole)
+            btn_cancel = msg_box.addButton("取消轉換", QMessageBox.ButtonRole.RejectRole)
+            
+            msg_box.exec()
+            
+            clicked_button = msg_box.clickedButton()
+            
+            if clicked_button == btn_cancel:
+                self._show_message_box("warning", "已取消", "使用者取消了轉換程序。")
+                return
+            
+            # Determine type
+            new_type = StaffType.INTERNAL if clicked_button == btn_internal else StaffType.EXTERNAL
+            
+            # Add to CSV
+            classifier = StaffClassifier()
+            success = classifier.add_staff(e.staff_name, new_type, Path(staff_csv_path))
+            
+            if success:
+                # Reload UI list to show user the update
+                self._load_staff_list(Path(staff_csv_path))
+                
+                # Retry conversion automatically
+                # Using QTimer to let the UI update first, or simple recursion
+                # Recursion is fine as depth won't be high (limited by # of staff)
+                self._on_convert()
+            else:
+                self._show_message_box("critical", "錯誤", f"無法更新人員名單檔案：\n{staff_csv_path}")
+
+        except ExcelFormatError as e:
+            self._show_message_box("critical", "格式錯誤", f"Excel 格式錯誤導致無法轉換：\n\n{str(e)}")
+
         except ValueError as e:
             # Scenario C: Complete failure (e.g., all staff skipped, no data)
             self._show_message_box("critical", "錯誤", f"轉換失敗：{str(e)}")
@@ -962,193 +1016,27 @@ class MainWindow(QMainWindow):
             self.lbl_holidays.setText(str(stats.holidays))
     
     def _generate_report(self, source_path: Path, output_path: Path) -> List[str]:
-        """Generate the attendance report with strict staff matching.
+        """Generate the attendance report (Deprecated - use AttendanceReportService).
         
-        This method implements strict matching logic:
-        - Staff members NOT in the staff list will be SKIPPED (not processed).
-        - Staff members in the list but NOT in source data are silently ignored.
+        This method is kept for backward compatibility but delegates to
+        AttendanceReportService internally.
         
         Args:
             source_path: Path to the source Excel file.
             output_path: Path to save the generated report.
             
         Returns:
-            List[str]: A list of names that were skipped (found in source but not in staff list).
-            
-        Raises:
-            ValueError: If no data found in source, or if all staff were skipped.
+            List[str]: A list of names that were skipped.
         """
-        from infrastructure.excel_parser import ExcelParser
-        from infrastructure.excel_writer import ExcelWriter
-        from domain.staff_classifier import StaffClassifier
-        from domain.attendance_logic import AttendanceLogicFactory
-        from domain.rate_calculator import RateCalculator
-        from domain.entities import StaffType, MonthlyAttendance, AttendanceRecord
-        
-        # Parse source file
-        parser = ExcelParser()
-        
-        # Try to extract year from filename (MonRepyymmdd format)
-        from infrastructure.filename_parser import FilenameParser
-        parsed_date = FilenameParser.try_parse_report_date(source_path.name)
-        year_from_filename = parsed_date[0] if parsed_date else None
-        
-        raw_data = parser.parse_file(source_path, year=year_from_filename)
-        
-        if not raw_data:
-            raise ValueError("來源檔案中沒有找到任何資料")
-        
-        # Determine year and month from data
-        first_date = raw_data[0].date
-        year = first_date.year
-        month = first_date.month
-        
-        # Get records by month
-        records_by_name = parser.get_records_by_month(year, month)
-        
-        if not records_by_name:
-            raise ValueError(f"來源檔案中沒有 {year} 年 {month} 月的資料")
-        
-        # Load staff classification (pre-condition already checked in _on_convert)
-        classifier = StaffClassifier()
-        classifier.load_from_csv(Path(self.config.paths.staff_csv))
-        
-        # Build holidays set from config (moved before loop to calculate work_days)
-        holidays_set = set()
-        for date_str in self.config.holidays.custom_dates:
-            try:
-                # Expect format: YYYY-MM-DD
-                parts = date_str.split('-')
-                holidays_set.add(date(int(parts[0]), int(parts[1]), int(parts[2])))
-            except (ValueError, IndexError):
-                pass
-        
-        # Get number of days in this month
-        from calendar import monthrange
-        _, num_days = monthrange(year, month)
-        
-        # Calculate attendance with strict matching
-        rate_calc = RateCalculator()
-        
-        internal_attendance: List[MonthlyAttendance] = []
-        external_attendance: List[MonthlyAttendance] = []
-        skipped_names: List[str] = []
-        
-        for name, raw_rows in records_by_name.items():
-            staff = classifier.get_staff_by_name(name)
-            
-            # Strict Matching: Skip if staff not in the list
-            if not staff:
-                skipped_names.append(name)
-                continue
-            
-            # Convert to records
-            records = parser.convert_to_attendance_records(raw_rows)
-            
-            # Apply logic
-            strategy = AttendanceLogicFactory.get_strategy(staff.staff_type)
-            time_rule = (
-                self.config.time_rules.internal 
-                if staff.staff_type == StaffType.INTERNAL 
-                else self.config.time_rules.external
-            )
-            
-            for record in records:
-                record.status = strategy.determine_status(record, time_rule)
-                record.remark = strategy.get_remark(record, time_rule)
-            
-            # Calculate work days for this staff member (based on staff type)
-            work_days_set = set()
-            for day in range(1, num_days + 1):
-                d = date(year, month, day)
-                if staff.should_work_on(d) and d not in holidays_set:
-                    work_days_set.add(day)
-            
-            # Calculate monthly attendance with work_days filter
-            monthly = rate_calc.calculate_monthly_attendance(
-                staff, records, year, month,
-                self.config.ui_prefs.rate_threshold,
-                work_days=work_days_set
-            )
-            
-            if staff.staff_type == StaffType.INTERNAL:
-                internal_attendance.append(monthly)
-            else:
-                external_attendance.append(monthly)
-        
-        # Scenario C: Complete failure - all staff were skipped
-        if not internal_attendance and not external_attendance:
-            if skipped_names:
-                raise ValueError(
-                    f"所有 {len(skipped_names)} 位人員都不在人員名單中，無法產生報表。\n"
-                    f"請確認人員名單是否正確。"
-                )
-            else:
-                raise ValueError("沒有任何人員資料可供處理")
-        
-        # Apply sorting based on config setting
-        from domain.sorting import sort_attendance_list
-        sort_by = self.config.output_settings.sort_by
-        internal_attendance = sort_attendance_list(internal_attendance, sort_by)
-        external_attendance = sort_attendance_list(external_attendance, sort_by)
-        
-        # Generate Excel (holidays_set already built above)
-        writer = ExcelWriter(self.config.ui_prefs.color_logic)
-        writer.create_report(
-            internal_attendance,
-            external_attendance,
-            year, month,
+        service = AttendanceReportService()
+        params = AttendanceReportService.build_params_from_config(
+            self.config,
+            source_path,
             output_path,
-            holidays=holidays_set
+            generate_pdf=self.chk_generate_pdf.isChecked()
         )
-        
-        # Generate PDF if checkbox is checked
-        if self.chk_generate_pdf.isChecked():
-            from infrastructure.pdf_writer import PdfWriter, format_filename
-            
-            pdf_writer = PdfWriter()
-            
-            # Determine PDF output directory
-            pdf_output_dir = self.config.output_settings.pdf_output_dir
-            if pdf_output_dir:
-                pdf_dir = Path(pdf_output_dir)
-            else:
-                pdf_dir = output_path.parent
-            
-            # Ensure PDF output dir exists
-            pdf_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Check if separate or combined PDF
-            if self.config.output_settings.separate_pdf:
-                # Generate separate PDFs for internal and external
-                if internal_attendance:
-                    internal_pdf_pattern = self.config.output_settings.internal_pdf_pattern
-                    internal_filename = format_filename(internal_pdf_pattern, year, month)
-                    internal_pdf_path = pdf_dir / internal_filename
-                    pdf_writer.create_report(
-                        internal_attendance, year, month,
-                        internal_pdf_path, "internal"
-                    )
-                
-                if external_attendance:
-                    external_pdf_pattern = self.config.output_settings.external_pdf_pattern
-                    external_filename = format_filename(external_pdf_pattern, year, month)
-                    external_pdf_path = pdf_dir / external_filename
-                    pdf_writer.create_report(
-                        external_attendance, year, month,
-                        external_pdf_path, "external"
-                    )
-            else:
-                # Generate combined PDF
-                combined_pattern = self.config.output_settings.pdf_filename_pattern
-                combined_filename = format_filename(combined_pattern, year, month)
-                combined_pdf_path = pdf_dir / combined_filename
-                pdf_writer.create_combined_report(
-                    internal_attendance, external_attendance,
-                    year, month, combined_pdf_path
-                )
-        
-        return skipped_names
+        result = service.generate_report(params)
+        return result.skipped_names
     
     def update_stats(self, stats: MonthlyStats):
         """Update statistics display."""

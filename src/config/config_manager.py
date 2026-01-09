@@ -64,6 +64,7 @@ class Paths:
     staff_csv: str = ""
     leave_list: str = ""
     last_source_file: str = ""
+    custom_font_path: str = ""  # Custom font path for PDF generation
 
 
 @dataclass
@@ -166,7 +167,8 @@ class ConfigManager:
             "paths": {
                 "staff_csv": config.paths.staff_csv,
                 "leave_list": config.paths.leave_list,
-                "last_source_file": config.paths.last_source_file
+                "last_source_file": config.paths.last_source_file,
+                "custom_font_path": config.paths.custom_font_path
             },
             "holidays": {
                 "use_auto_fetch": config.holidays.use_auto_fetch,
@@ -229,7 +231,8 @@ class ConfigManager:
         paths = Paths(
             staff_csv=paths_data.get("staff_csv", ""),
             leave_list=paths_data.get("leave_list", ""),
-            last_source_file=paths_data.get("last_source_file", "")
+            last_source_file=paths_data.get("last_source_file", ""),
+            custom_font_path=paths_data.get("custom_font_path", "")
         )
         
         # Build Holidays

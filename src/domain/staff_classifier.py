@@ -126,3 +126,44 @@ class StaffClassifier:
             if staff.name == name:
                 return staff
         return None
+
+    def add_staff(self, name: str, staff_type: StaffType, csv_path: Path) -> bool:
+        """
+        Append a new staff member to the CSV file.
+        
+        Args:
+            name: Staff name
+            staff_type: Staff type (Internal/External)
+            csv_path: Path to the CSV file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        type_str = "內勤" if staff_type == StaffType.INTERNAL else "外勤"
+        
+        try:
+            file_exists = csv_path.exists()
+            
+            with open(csv_path, 'a', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                
+                # If file is new or empty, write header first
+                if not file_exists or csv_path.stat().st_size == 0:
+                    writer.writerow(['Name', 'Type'])
+                
+                writer.writerow([name, type_str])
+            
+            # Refresh internal list
+            staff = Staff(name=name, staff_type=staff_type)
+            self._staff_list.append(staff)
+            if staff_type == StaffType.INTERNAL:
+                self._internal_staff.append(staff)
+            else:
+                self._external_staff.append(staff)
+                
+            return True
+            
+        except Exception as e:
+            # In a real app we might log this
+            print(f"Failed to append to CSV: {e}")
+            return False

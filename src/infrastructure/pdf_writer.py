@@ -2,43 +2,139 @@
 PDF Writer Module
 
 Generates formatted PDF attendance reports using fpdf2.
-Supports Chinese text via system fonts (e.g., Microsoft JhengHei on Windows).
+Supports Chinese text via system fonts with cross-platform compatibility.
 """
 
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from fpdf import FPDF
 
 from domain.entities import MonthlyAttendance, RateColorTier
+from infrastructure.logger import get_logger
+
+logger = get_logger("PdfWriter")
 
 
 # ==============================================================================
 # Font Configuration
 # ==============================================================================
 # Fallback chain for Chinese-capable fonts on Windows.
-# Ordered by preference. First found font will be used.
-# To use a custom font, prepend its path to this list or modify via config.
-CHINESE_FONT_PATHS: List[Path] = [
+WINDOWS_FONT_PATHS: List[Path] = [
     Path("C:/Windows/Fonts/msjh.ttc"),       # 微軟正黑體 (Microsoft JhengHei)
     Path("C:/Windows/Fonts/msyh.ttc"),       # 微軟雅黑 (Microsoft YaHei)
     Path("C:/Windows/Fonts/simsun.ttc"),     # 宋體 (SimSun)
     Path("C:/Windows/Fonts/mingliu.ttc"),    # 細明體 (MingLiU)
 ]
 
+# Fallback chain for Chinese-capable fonts on macOS.
+MACOS_FONT_PATHS: List[Path] = [
+    Path("/System/Library/Fonts/STHeiti Light.ttc"),      # 黑體-繁
+    Path("/System/Library/Fonts/STHeiti Medium.ttc"),     # 黑體-繁 中
+    Path("/System/Library/Fonts/PingFang.ttc"),           # 蘋方
+    Path("/Library/Fonts/Arial Unicode.ttf"),             # Arial Unicode MS
+    Path("/System/Library/Fonts/Supplemental/Songti.ttc"), # 宋體
+]
+
+# Fallback chain for Linux (common CJK fonts)
+LINUX_FONT_PATHS: List[Path] = [
+    Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+    Path("/usr/share/fonts/truetype/droid/DroidSansFallback.ttf"),
+]
+
 FALLBACK_FONT = "Helvetica"  # Last resort if no Chinese font found
 
 
-def find_chinese_font() -> Optional[Path]:
+def find_chinese_font(custom_font_path: Optional[str] = None) -> Optional[Path]:
     """
-    Search for an available Chinese font from the fallback chain.
+    Search for an available Chinese font with cross-platform support.
     
+    Priority:
+    1. Custom font path from config (if provided and exists)
+    2. Platform-specific font search
+    3. Matplotlib font_manager fallback (if available)
+    
+    Args:
+        custom_font_path: Optional custom font path from configuration
+        
     Returns:
         Path to the first available font, or None if none found.
     """
-    for font_path in CHINESE_FONT_PATHS:
+    # Priority 1: Custom font path from config
+    if custom_font_path:
+        custom_path = Path(custom_font_path)
+        if custom_path.exists():
+            logger.info(f"使用自訂字型: {custom_path}")
+            return custom_path
+        else:
+            logger.warning(f"自訂字型路徑不存在: {custom_path}")
+    
+    # Priority 2: Platform-specific font paths
+    platform_fonts = _get_platform_fonts()
+    for font_path in platform_fonts:
         if font_path.exists():
+            logger.debug(f"找到系統字型: {font_path}")
             return font_path
+    
+    # Priority 3: Try matplotlib font_manager if available
+    font_from_matplotlib = _try_matplotlib_font()
+    if font_from_matplotlib:
+        return font_from_matplotlib
+    
+    return None
+
+
+def _get_platform_fonts() -> List[Path]:
+    """Get the font search list for the current platform."""
+    if sys.platform == 'win32':
+        return WINDOWS_FONT_PATHS
+    elif sys.platform == 'darwin':
+        return MACOS_FONT_PATHS
+    else:
+        # Linux and other Unix-like systems
+        return LINUX_FONT_PATHS
+
+
+def _try_matplotlib_font() -> Optional[Path]:
+    """
+    Try to find a Chinese font using matplotlib's font_manager.
+    
+    This is a fallback for when platform-specific paths don't work.
+    """
+    try:
+        from matplotlib import font_manager
+        
+        # Try common Chinese font names
+        font_names = [
+            'Microsoft JhengHei',  # Windows Traditional Chinese
+            'Microsoft YaHei',     # Windows Simplified Chinese
+            'SimHei',              # Windows 黑體
+            'PingFang TC',         # macOS Traditional Chinese
+            'PingFang SC',         # macOS Simplified Chinese
+            'Noto Sans CJK TC',    # Google Noto fonts
+            'Noto Sans CJK SC',
+            'WenQuanYi Micro Hei', # Linux common
+        ]
+        
+        for font_name in font_names:
+            font_path = font_manager.findfont(
+                font_manager.FontProperties(family=font_name),
+                fallback_to_default=False
+            )
+            if font_path and Path(font_path).exists():
+                # Verify it's not the default fallback
+                if 'DejaVu' not in font_path and 'Helvetica' not in font_path:
+                    logger.info(f"透過 matplotlib 找到字型: {font_path}")
+                    return Path(font_path)
+        
+    except ImportError:
+        logger.debug("matplotlib 未安裝，跳過 font_manager 字型搜尋")
+    except Exception as e:
+        logger.debug(f"matplotlib font_manager 搜尋失敗: {e}")
+    
     return None
 
 
@@ -59,15 +155,22 @@ class AttendancePdf(FPDF):
     _font_family: str = FALLBACK_FONT
     _font_loaded: bool = False
     
-    def __init__(self, title: str = ""):
+    def __init__(self, title: str = "", custom_font_path: Optional[str] = None):
+        """
+        Initialize AttendancePdf.
+        
+        Args:
+            title: Report title to display in header
+            custom_font_path: Optional custom font path from configuration
+        """
         # Portrait A4 for cleaner summary layout
         super().__init__(orientation='P', unit='mm', format='A4')
         self.title_text = title
-        self._setup_chinese_font()
+        self._setup_chinese_font(custom_font_path)
     
-    def _setup_chinese_font(self) -> None:
+    def _setup_chinese_font(self, custom_font_path: Optional[str] = None) -> None:
         """Load Chinese font if available, otherwise fall back to Helvetica."""
-        font_path = find_chinese_font()
+        font_path = find_chinese_font(custom_font_path)
         
         if font_path:
             try:
@@ -75,13 +178,20 @@ class AttendancePdf(FPDF):
                 self.add_font("ChineseFont", "", str(font_path), uni=True)
                 self._font_family = "ChineseFont"
                 self._font_loaded = True
+                logger.info(f"成功載入中文字型: {font_path.name}")
             except Exception as e:
                 # Font loading failed, use fallback
-                print(f"[PdfWriter] Warning: Failed to load Chinese font: {e}")
+                logger.warning(f"無法載入中文字型 {font_path}: {e}")
                 self._font_family = FALLBACK_FONT
                 self._font_loaded = False
         else:
-            print("[PdfWriter] Warning: No Chinese font found, using Helvetica (中文可能亂碼)")
+            logger.warning(
+                "無法找到中文字型，PDF 中文將無法正確顯示。\n"
+                "建議：\n"
+                "  - Windows: 確認 C:\\Windows\\Fonts 中有中文字型\n"
+                "  - macOS: 確認系統已安裝中文字型\n"
+                "  - 或在設定中指定自訂字型路徑 (custom_font_path)"
+            )
             self._font_family = FALLBACK_FONT
             self._font_loaded = False
     
@@ -143,9 +253,14 @@ class PdfWriter:
     }
     ROW_HEIGHT = 10
     
-    def __init__(self):
-        """Initialize PdfWriter. Stateless; all config via method args."""
-        pass
+    def __init__(self, custom_font_path: Optional[str] = None):
+        """
+        Initialize PdfWriter.
+        
+        Args:
+            custom_font_path: Optional custom font path for PDF generation
+        """
+        self._custom_font_path = custom_font_path
     
     def create_report(
         self,
@@ -171,7 +286,7 @@ class PdfWriter:
         type_label = "內勤" if report_type == "internal" else "外勤"
         title = f"{year}年{month}月 {type_label}出勤報表"
         
-        pdf = AttendancePdf(title=title)
+        pdf = AttendancePdf(title=title, custom_font_path=self._custom_font_path)
         pdf.alias_nb_pages()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -206,7 +321,7 @@ class PdfWriter:
             return
         
         title = f"{year}年{month}月 出勤報表"
-        pdf = AttendancePdf(title=title)
+        pdf = AttendancePdf(title=title, custom_font_path=self._custom_font_path)
         pdf.alias_nb_pages()
         pdf.set_auto_page_break(auto=True, margin=15)
         

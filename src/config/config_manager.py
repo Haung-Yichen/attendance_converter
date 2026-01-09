@@ -62,6 +62,7 @@ class UIPrefs:
     """UI preferences including color logic and rate threshold."""
     color_logic: ColorLogic = field(default_factory=ColorLogic)
     rate_threshold: int = 80
+    theme_name: str = "Dark Mode"
 
 
 @dataclass
@@ -164,7 +165,8 @@ class ConfigManager:
                     "red_abnormal_in": config.ui_prefs.color_logic.red_abnormal_in,
                     "red_abnormal_out": config.ui_prefs.color_logic.red_abnormal_out
                 },
-                "rate_threshold": config.ui_prefs.rate_threshold
+                "rate_threshold": config.ui_prefs.rate_threshold,
+                "theme_name": config.ui_prefs.theme_name
             },
             "output_settings": {
                 "output_dir": config.output_settings.output_dir,
@@ -221,7 +223,8 @@ class ConfigManager:
                 red_abnormal_in=color_logic_data.get("red_abnormal_in", True),
                 red_abnormal_out=color_logic_data.get("red_abnormal_out", True)
             ),
-            rate_threshold=ui_prefs_data.get("rate_threshold", 80)
+            rate_threshold=ui_prefs_data.get("rate_threshold", 80),
+            theme_name=ui_prefs_data.get("theme_name", "Dark Mode")
         )
         
         # Build OutputSettings

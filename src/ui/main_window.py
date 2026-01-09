@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMenuBar, QMenu, QSplitter
 )
 from PyQt6.QtCore import Qt, QTime
-from PyQt6.QtGui import QAction, QFont
+from ui.styles import ThemeManager
+from PyQt6.QtGui import QAction, QActionGroup, QFont
 
 from config.config_manager import ConfigManager, AppConfig, TimeRule, ColorLogic, OutputSettings
 from domain.entities import MonthlyStats
@@ -105,6 +106,24 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # Theme menu
+        theme_menu = menubar.addMenu("主題")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        
+        # Get available themes and create actions
+        current_theme = self.config.ui_prefs.theme_name
+        
+        for theme_name in ThemeManager.get_available_themes():
+            action = QAction(theme_name, self, checkable=True)
+            action.setData(theme_name)
+            if theme_name == current_theme:
+                action.setChecked(True)
+            
+            action.triggered.connect(lambda checked, name=theme_name: self._on_switch_theme(name))
+            theme_menu.addAction(action)
+            theme_group.addAction(action)
+
         # Help menu
         help_menu = menubar.addMenu("幫助")
         
@@ -174,33 +193,53 @@ class MainWindow(QMainWindow):
         # Internal check-in
         time_layout.addWidget(QLabel("內勤上班時間"), 0, 0)
         self.internal_in_start = QTimeEdit()
+        self.internal_in_start.setDisplayFormat("HH:mm")
         self.internal_in_end = QTimeEdit()
+        self.internal_in_end.setDisplayFormat("HH:mm")
         time_layout.addWidget(self.internal_in_start, 0, 1)
-        time_layout.addWidget(QLabel("~"), 0, 2)
+        lbl_tilde_1 = QLabel("~")
+        lbl_tilde_1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_tilde_1.setStyleSheet("font-size: 18px; font-weight: bold;")
+        time_layout.addWidget(lbl_tilde_1, 0, 2)
         time_layout.addWidget(self.internal_in_end, 0, 3)
         
         # Internal check-out
         time_layout.addWidget(QLabel("內勤下班時間"), 0, 4)
         self.internal_out_start = QTimeEdit()
+        self.internal_out_start.setDisplayFormat("HH:mm")
         self.internal_out_end = QTimeEdit()
+        self.internal_out_end.setDisplayFormat("HH:mm")
         time_layout.addWidget(self.internal_out_start, 0, 5)
-        time_layout.addWidget(QLabel("~"), 0, 6)
+        lbl_tilde_2 = QLabel("~")
+        lbl_tilde_2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_tilde_2.setStyleSheet("font-size: 18px; font-weight: bold;")
+        time_layout.addWidget(lbl_tilde_2, 0, 6)
         time_layout.addWidget(self.internal_out_end, 0, 7)
         
         # External check-in
         time_layout.addWidget(QLabel("外勤上班時間"), 1, 0)
         self.external_in_start = QTimeEdit()
+        self.external_in_start.setDisplayFormat("HH:mm")
         self.external_in_end = QTimeEdit()
+        self.external_in_end.setDisplayFormat("HH:mm")
         time_layout.addWidget(self.external_in_start, 1, 1)
-        time_layout.addWidget(QLabel("~"), 1, 2)
+        lbl_tilde_3 = QLabel("~")
+        lbl_tilde_3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_tilde_3.setStyleSheet("font-size: 18px; font-weight: bold;")
+        time_layout.addWidget(lbl_tilde_3, 1, 2)
         time_layout.addWidget(self.external_in_end, 1, 3)
         
         # External check-out
         time_layout.addWidget(QLabel("外勤下班時間"), 1, 4)
         self.external_out_start = QTimeEdit()
+        self.external_out_start.setDisplayFormat("HH:mm")
         self.external_out_end = QTimeEdit()
+        self.external_out_end.setDisplayFormat("HH:mm")
         time_layout.addWidget(self.external_out_start, 1, 5)
-        time_layout.addWidget(QLabel("~"), 1, 6)
+        lbl_tilde_4 = QLabel("~")
+        lbl_tilde_4.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_tilde_4.setStyleSheet("font-size: 18px; font-weight: bold;")
+        time_layout.addWidget(lbl_tilde_4, 1, 6)
         time_layout.addWidget(self.external_out_end, 1, 7)
         
         layout.addWidget(time_group, stretch=0)
@@ -395,100 +434,16 @@ class MainWindow(QMainWindow):
         return panel
     
     def _apply_styles(self):
-        """Apply visual styles to the window."""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1e1e1e;
-            }
-            QWidget {
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 13px;
-                color: #e0e0e0;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #3e3e42;
-                border-radius: 6px;
-                margin-top: 12px;
-                padding-top: 16px;
-                background-color: #252526;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 5px;
-                color: #4ec9b0;
-            }
-            QListWidget {
-                background-color: #1e1e1e;
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
-                padding: 4px;
-                outline: none;
-            }
-            QListWidget::item:selected {
-                background-color: #37373d;
-                border-radius: 2px;
-            }
-            QLabel {
-                color: #e0e0e0;
-            }
-            QCheckBox {
-                spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #6e6e6e;
-                border-radius: 3px;
-                background: #1e1e1e;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #4ec9b0;
-                border-color: #4ec9b0;
-                image: url(data:image/svg+xml;base64,...); /* Optional: add check icon */
-            }
-            QLineEdit, QTimeEdit, QSpinBox {
-                background-color: #3c3c3c;
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
-                padding: 6px;
-                color: #f0f0f0;
-                selection-background-color: #264f78;
-            }
-            QLineEdit:focus, QTimeEdit:focus, QSpinBox:focus {
-                border: 1px solid #0078d4;
-            }
-            QPushButton {
-                background-color: #0078d4;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #106ebe;
-            }
-            QPushButton:pressed {
-                background-color: #005a9e;
-            }
-            QMenuBar {
-                background-color: #252526;
-                color: #cccccc;
-                border-bottom: 1px solid #3e3e42;
-            }
-            QMenuBar::item:selected {
-                background-color: #37373d;
-            }
-            QMenu {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-            }
-            QMenu::item:selected {
-                background-color: #37373d;
-            }
-        """)
+        """Apply visual styles to the window using ThemeManager."""
+        theme_name = self.config.ui_prefs.theme_name
+        theme = ThemeManager.get_theme(theme_name)
+        self.setStyleSheet(theme.stylesheet)
+
+    def _on_switch_theme(self, theme_name: str):
+        """Handle theme switching."""
+        self.config.ui_prefs.theme_name = theme_name
+        self.config_manager.save()
+        self._apply_styles()
     
     def _connect_signals(self):
         """Connect UI signals to handlers."""

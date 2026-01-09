@@ -226,9 +226,14 @@ class AttendanceReportService:
         
         # Generate PDF if enabled
         if params.generate_pdf:
-            self._generate_pdf_reports(
-                params, internal_attendance, external_attendance, year, month
-            )
+            try:
+                self._generate_pdf_reports(
+                    params, internal_attendance, external_attendance, year, month
+                )
+            except Exception as e:
+                logger.error(f"PDF 生成失敗: {e}")
+                # We don't fail the entire process if PDF fails, but we should inform
+                # In a future update, we could add a warnings field to ReportResult
         
         return ReportResult(
             success=True,

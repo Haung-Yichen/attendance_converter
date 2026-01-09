@@ -7,8 +7,11 @@ Handles loading and classifying staff members from CSV files.
 import csv
 from pathlib import Path
 from typing import List, Dict, Tuple
+from infrastructure.logger import get_logger
 
 from .entities import Staff, StaffType
+
+logger = get_logger("StaffClassifier")
 
 
 class StaffClassifier:
@@ -48,23 +51,27 @@ class StaffClassifier:
         if not csv_path.exists():
             return ([], [])
         
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                name = row.get('Name', row.get('name', row.get('姓名', ''))).strip()
-                type_str = row.get('Type', row.get('type', row.get('類型', row.get('類別', '')))).strip()
-                
-                if not name:
-                    continue
-                
-                staff_type = self.TYPE_MAPPING.get(type_str, self.TYPE_MAPPING.get(type_str.lower(), StaffType.INTERNAL))
-                staff = Staff(name=name, staff_type=staff_type)
-                
-                self._staff_list.append(staff)
-                if staff_type == StaffType.INTERNAL:
-                    self._internal_staff.append(staff)
-                else:
-                    self._external_staff.append(staff)
+        try:
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    name = row.get('Name', row.get('name', row.get('姓名', ''))).strip()
+                    type_str = row.get('Type', row.get('type', row.get('類型', row.get('類別', '')))).strip()
+                    
+                    if not name:
+                        continue
+                    
+                    staff_type = self.TYPE_MAPPING.get(type_str, self.TYPE_MAPPING.get(type_str.lower(), StaffType.INTERNAL))
+                    staff = Staff(name=name, staff_type=staff_type)
+                    
+                    self._staff_list.append(staff)
+                    if staff_type == StaffType.INTERNAL:
+                        self._internal_staff.append(staff)
+                    else:
+                        self._external_staff.append(staff)
+        except Exception as e:
+            logger.error(f"Failed to load staff CSV {csv_path}: {e}")
+            raise
         
         return (self._internal_staff, self._external_staff)
     
@@ -165,5 +172,5 @@ class StaffClassifier:
             
         except Exception as e:
             # In a real app we might log this
-            print(f"Failed to append to CSV: {e}")
+            logger.error(f"Failed to append to CSV: {e}")
             return False

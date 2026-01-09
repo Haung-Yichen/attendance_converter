@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 import os
+import sys
 
 
 @dataclass
@@ -25,7 +26,7 @@ class ColorLogic:
     abnormal_out_color: str = "red"      # 異常下班打卡顏色
     
     # 缺卡與曠職設定
-    missing_punch_color: str = "black"   # 當日缺少打卡紀錄顏色
+    missing_punch_color: str = "orange"  # 當日缺少打卡紀錄顏色
     missing_punch_text: str = "*"        # 缺少打卡紀錄標記文字
     absent_color: str = "none"           # 曠職標記顏色
     absent_text: str = "-"               # 曠職標記文字
@@ -123,10 +124,20 @@ class ConfigManager:
     - Convert between dataclass and dict representations
     """
     
-    DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config.json"
-    
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or self.DEFAULT_CONFIG_PATH
+        if config_path:
+            self.config_path = config_path
+        else:
+            # Determine config path based on execution context
+            if getattr(sys, 'frozen', False):
+                # If running as compiled exe, use the same folder as the exe
+                base_path = Path(sys.executable).parent
+            else:
+                # If running as script, use project root
+                base_path = Path(__file__).parent.parent.parent
+            
+            self.config_path = base_path / "config.json"
+            
         self._config: AppConfig = AppConfig()
     
     @property
@@ -268,7 +279,7 @@ class ConfigManager:
                 normal_out_color=color_logic_data.get("normal_out_color", "green"),
                 abnormal_in_color=color_logic_data.get("abnormal_in_color", "red"),
                 abnormal_out_color=color_logic_data.get("abnormal_out_color", "red"),
-                missing_punch_color=color_logic_data.get("missing_punch_color", "black"),
+                missing_punch_color=color_logic_data.get("missing_punch_color", "orange"),
                 missing_punch_text=color_logic_data.get("missing_punch_text", "*"),
                 absent_color=color_logic_data.get("absent_color", "none"),
                 absent_text=color_logic_data.get("absent_text", "-"),

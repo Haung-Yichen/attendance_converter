@@ -583,9 +583,13 @@ class MainWindow(QMainWindow):
             "CSV Files (*.csv);;All Files (*)"
         )
         if file_path:
-            self.config.paths.staff_csv = file_path
-            self.config_manager.save()
-            self._load_staff_list(Path(file_path))
+            try:
+                self._load_staff_list(Path(file_path))
+                # Only save config if load successful
+                self.config.paths.staff_csv = file_path
+                self.config_manager.save()
+            except Exception as e:
+                self._show_message_box("critical", "匯入失敗", f"無法載入人員名單：\n{str(e)}")
     
     def _on_import_leave(self):
         """Handle import leave list button."""
@@ -911,9 +915,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass  # Config path failed, try default location
         
-        # Try default location (same directory as main.py)
-        project_root = Path(__file__).parent.parent.parent
-        default_csv_path = project_root / self.DEFAULT_STAFF_CSV
+        # Try to resolve default location based on execution context (Dev vs Frozen/Exe)
+        if getattr(sys, 'frozen', False):
+            # If running as compiled exe, look in the same folder as the exe
+            application_path = Path(sys.executable).parent
+        else:
+            # If running as script, look in project root (assuming src/ui/main_window.py structure)
+            application_path = Path(__file__).parent.parent.parent
+            
+        default_csv_path = application_path / self.DEFAULT_STAFF_CSV
         
         if default_csv_path.exists():
             try:

@@ -2,64 +2,149 @@
 PDF Writer Module
 
 Generates formatted PDF attendance reports using fpdf2.
-Supports Chinese text and creates reports similar to Excel output.
+Supports Chinese text via system fonts (e.g., Microsoft JhengHei on Windows).
 """
 
-from calendar import monthrange
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fpdf import FPDF
 
-from domain.entities import (
-    MonthlyAttendance, AttendanceRecord, AttendanceStatus, RateColorTier
-)
+from domain.entities import MonthlyAttendance, RateColorTier
 
 
+# ==============================================================================
+# Font Configuration
+# ==============================================================================
+# Fallback chain for Chinese-capable fonts on Windows.
+# Ordered by preference. First found font will be used.
+# To use a custom font, prepend its path to this list or modify via config.
+CHINESE_FONT_PATHS: List[Path] = [
+    Path("C:/Windows/Fonts/msjh.ttc"),       # 微軟正黑體 (Microsoft JhengHei)
+    Path("C:/Windows/Fonts/msyh.ttc"),       # 微軟雅黑 (Microsoft YaHei)
+    Path("C:/Windows/Fonts/simsun.ttc"),     # 宋體 (SimSun)
+    Path("C:/Windows/Fonts/mingliu.ttc"),    # 細明體 (MingLiU)
+]
+
+FALLBACK_FONT = "Helvetica"  # Last resort if no Chinese font found
+
+
+def find_chinese_font() -> Optional[Path]:
+    """
+    Search for an available Chinese font from the fallback chain.
+    
+    Returns:
+        Path to the first available font, or None if none found.
+    """
+    for font_path in CHINESE_FONT_PATHS:
+        if font_path.exists():
+            return font_path
+    return None
+
+
+# ==============================================================================
+# AttendancePdf Class
+# ==============================================================================
 class AttendancePdf(FPDF):
-    """Custom FPDF class with header and footer."""
+    """
+    Custom FPDF class with Chinese font support, header, and footer.
+    
+    This class handles:
+    - Loading and registering Chinese fonts
+    - Drawing page headers with report title
+    - Drawing page footers with page numbers
+    """
+    
+    # Font family name after registration
+    _font_family: str = FALLBACK_FONT
+    _font_loaded: bool = False
     
     def __init__(self, title: str = ""):
-        super().__init__(orientation='L', unit='mm', format='A4')
+        # Portrait A4 for cleaner summary layout
+        super().__init__(orientation='P', unit='mm', format='A4')
         self.title_text = title
-        # Use built-in font that supports basic characters
-        # For full Chinese support, a TTF font would need to be added
+        self._setup_chinese_font()
     
-    def header(self):
-        """Add header to each page."""
-        self.set_font('Helvetica', 'B', 14)
-        self.cell(0, 10, self.title_text, align='C', new_x='LMARGIN', new_y='NEXT')
-        self.ln(5)
+    def _setup_chinese_font(self) -> None:
+        """Load Chinese font if available, otherwise fall back to Helvetica."""
+        font_path = find_chinese_font()
+        
+        if font_path:
+            try:
+                # Register the font with a simple name
+                self.add_font("ChineseFont", "", str(font_path), uni=True)
+                self._font_family = "ChineseFont"
+                self._font_loaded = True
+            except Exception as e:
+                # Font loading failed, use fallback
+                print(f"[PdfWriter] Warning: Failed to load Chinese font: {e}")
+                self._font_family = FALLBACK_FONT
+                self._font_loaded = False
+        else:
+            print("[PdfWriter] Warning: No Chinese font found, using Helvetica (中文可能亂碼)")
+            self._font_family = FALLBACK_FONT
+            self._font_loaded = False
     
-    def footer(self):
-        """Add footer with page number."""
+    @property
+    def font_family_name(self) -> str:
+        """Return the active font family name."""
+        return self._font_family
+    
+    def header(self) -> None:
+        """Draw page header with centered title."""
+        self.set_font(self._font_family, '', 16)
+        self.cell(0, 12, self.title_text, align='C', new_x='LMARGIN', new_y='NEXT')
+        self.ln(8)
+    
+    def footer(self) -> None:
+        """Draw page footer with page number."""
         self.set_y(-15)
-        self.set_font('Helvetica', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}/{{nb}}', align='C')
+        self.set_font(self._font_family, '', 9)
+        self.cell(0, 10, f'第 {self.page_no()}/{{nb}} 頁', align='C')
 
 
+# ==============================================================================
+# PdfWriter Class
+# ==============================================================================
 class PdfWriter:
     """
-    Generates PDF attendance reports.
+    Generates PDF attendance summary reports.
     
-    Creates reports with:
-    - Staff name
-    - Daily attendance times
-    - Monthly attendance rate
+    Output format (simplified):
+    - 姓名 (Name)
+    - 實際出勤天數 (Actual Days)
+    - 出席率 (Attendance Rate)
+    
+    Responsibilities:
+    - Coordinating PDF creation
+    - Delegating drawing to specialized methods
+    - NOT performing data processing (SRP)
     """
     
-    # Color definitions (RGB)
+    # RGB Color definitions
     COLORS = {
-        'green': (144, 238, 144),   # Light green
-        'yellow': (255, 215, 0),     # Gold
-        'red': (255, 107, 107),      # Light red
-        'header': (68, 114, 196),    # Blue header
+        'green': (144, 238, 144),    # Light green - good rate
+        'yellow': (255, 215, 0),      # Gold - warning rate
+        'red': (255, 107, 107),       # Light red - poor rate
+        'header': (68, 114, 196),     # Blue header background
         'white': (255, 255, 255),
         'black': (0, 0, 0),
-        'gray': (200, 200, 200),
+        'gray': (245, 245, 245),      # Alternating row background
     }
     
+    # Table layout (mm) - optimized for 3-column summary
+    # A4 Portrait width = 210mm, margins = 10mm each side → 190mm available
+    MARGIN = 10
+    TABLE_WIDTH = 190
+    COL_WIDTHS = {
+        'name': 80,          # 姓名
+        'actual_days': 55,   # 實際出勤天數
+        'rate': 55,          # 出席率
+    }
+    ROW_HEIGHT = 10
+    
     def __init__(self):
+        """Initialize PdfWriter. Stateless; all config via method args."""
         pass
     
     def create_report(
@@ -71,14 +156,14 @@ class PdfWriter:
         report_type: str = "internal"
     ) -> None:
         """
-        Create PDF report with attendance table.
+        Create PDF summary report.
         
         Args:
             attendance_list: List of monthly attendance records
             year: Report year
             month: Report month
-            output_path: Output file path
-            report_type: "internal" or "external"
+            output_path: Output file path (.pdf)
+            report_type: "internal" or "external" (for title display)
         """
         if not attendance_list:
             return
@@ -91,140 +176,147 @@ class PdfWriter:
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
         
-        # Get days in month
-        _, days_in_month = monthrange(year, month)
+        # Draw table
+        self._draw_table_header(pdf)
+        self._draw_table_body(pdf, attendance_list)
         
-        # Calculate column widths
-        # Page width (A4 Landscape) = 297mm, margins = 10mm each side
-        available_width = 277
-        name_col_width = 25
-        rate_col_width = 15
-        day_col_width = (available_width - name_col_width - rate_col_width) / days_in_month
-        
-        # Draw header row
-        self._draw_header(pdf, days_in_month, name_col_width, day_col_width, rate_col_width)
-        
-        # Draw data rows
-        for attendance in attendance_list:
-            self._draw_attendance_row(
-                pdf, attendance, days_in_month,
-                name_col_width, day_col_width, rate_col_width
-            )
-        
-        # Save PDF
+        # Save
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         pdf.output(str(output_path))
     
-    def _draw_header(
+    def create_combined_report(
         self,
-        pdf: FPDF,
-        days_in_month: int,
-        name_width: float,
-        day_width: float,
-        rate_width: float
+        internal_list: List[MonthlyAttendance],
+        external_list: List[MonthlyAttendance],
+        year: int,
+        month: int,
+        output_path: Path
     ) -> None:
+        """
+        Create combined PDF report with both internal and external staff.
+        
+        Args:
+            internal_list: List of internal staff attendance records
+            external_list: List of external staff attendance records
+            year: Report year
+            month: Report month
+            output_path: Output file path (.pdf)
+        """
+        if not internal_list and not external_list:
+            return
+        
+        title = f"{year}年{month}月 出勤報表"
+        pdf = AttendancePdf(title=title)
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        
+        # Internal staff section
+        if internal_list:
+            pdf.add_page()
+            pdf.set_font(pdf.font_family_name, '', 14)
+            pdf.cell(0, 10, "【內勤】", new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(5)
+            self._draw_table_header(pdf)
+            self._draw_table_body(pdf, internal_list)
+        
+        # External staff section
+        if external_list:
+            pdf.add_page()
+            pdf.set_font(pdf.font_family_name, '', 14)
+            pdf.cell(0, 10, "【外勤】", new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(5)
+            self._draw_table_header(pdf)
+            self._draw_table_body(pdf, external_list)
+        
+        # Save
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf.output(str(output_path))
+    
+    def _draw_table_header(self, pdf: AttendancePdf) -> None:
         """Draw the table header row."""
-        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_font(pdf.font_family_name, '', 11)
         pdf.set_fill_color(*self.COLORS['header'])
         pdf.set_text_color(*self.COLORS['white'])
         
-        # Name column
-        pdf.cell(name_width, 8, 'Name', border=1, align='C', fill=True)
+        # Center the table
+        x_start = (210 - self.TABLE_WIDTH) / 2
+        pdf.set_x(x_start)
         
-        # Day columns
-        for day in range(1, days_in_month + 1):
-            pdf.cell(day_width, 8, str(day), border=1, align='C', fill=True)
+        headers = [
+            ('姓名', self.COL_WIDTHS['name']),
+            ('實際出勤天數', self.COL_WIDTHS['actual_days']),
+            ('出席率', self.COL_WIDTHS['rate']),
+        ]
         
-        # Rate column
-        pdf.cell(rate_width, 8, 'Rate', border=1, align='C', fill=True)
+        for text, width in headers:
+            pdf.cell(width, self.ROW_HEIGHT, text, border=1, align='C', fill=True)
+        
         pdf.ln()
-        
-        # Reset text color
         pdf.set_text_color(*self.COLORS['black'])
     
-    def _draw_attendance_row(
-        self,
-        pdf: FPDF,
-        attendance: MonthlyAttendance,
-        days_in_month: int,
-        name_width: float,
-        day_width: float,
-        rate_width: float
+    def _draw_table_body(
+        self, 
+        pdf: AttendancePdf, 
+        attendance_list: List[MonthlyAttendance]
     ) -> None:
-        """Draw a single attendance row (two lines: in/out times)."""
-        pdf.set_font('Helvetica', '', 6)
+        """Draw all data rows."""
+        pdf.set_font(pdf.font_family_name, '', 10)
+        x_start = (210 - self.TABLE_WIDTH) / 2
         
-        # Create lookup for records by day
-        records_by_day = {}
-        for record in attendance.records:
-            records_by_day[record.date.day] = record
+        for idx, attendance in enumerate(attendance_list):
+            # Alternating row background
+            use_gray_bg = (idx % 2 == 1)
+            
+            pdf.set_x(x_start)
+            self._draw_data_row(pdf, attendance, use_gray_bg)
+    
+    def _draw_data_row(
+        self, 
+        pdf: AttendancePdf, 
+        attendance: MonthlyAttendance,
+        use_gray_bg: bool
+    ) -> None:
+        """
+        Draw a single data row.
         
-        row_height = 5
-        
-        # Check-in row
-        # Name cell (spans 2 rows conceptually, but we'll draw it in first row)
-        pdf.cell(name_width, row_height * 2, attendance.staff.name[:10], border=1, align='C')
-        
-        # Save position for out row
-        x_after_name = pdf.get_x()
-        y_start = pdf.get_y()
-        
-        # Go back to draw in times
-        pdf.set_xy(x_after_name, y_start)
-        
-        # In times
-        for day in range(1, days_in_month + 1):
-            record = records_by_day.get(day)
-            if record and record.check_in:
-                time_str = record.check_in.strftime('%H:%M')
-                # Apply color based on status
-                fill_color = self._get_status_color(record, is_in=True)
-                if fill_color:
-                    pdf.set_fill_color(*fill_color)
-                    pdf.cell(day_width, row_height, time_str, border=1, align='C', fill=True)
-                else:
-                    pdf.cell(day_width, row_height, time_str, border=1, align='C')
-            else:
-                pdf.cell(day_width, row_height, '-', border=1, align='C')
-        
-        # Rate cell (spans 2 rows)
+        Args:
+            pdf: The PDF instance
+            attendance: MonthlyAttendance data for this row
+            use_gray_bg: Whether to use gray background for alternating rows
+        """
+        # Prepare cell data
+        name = attendance.staff.name
+        actual_days = str(attendance.actual_days)
+        rate_str = f"{attendance.attendance_rate:.1f}%"
         rate_color = self._get_rate_color(attendance.rate_color)
+        
+        # Row background
+        bg_color = self.COLORS['gray'] if use_gray_bg else self.COLORS['white']
+        
+        # Name cell
+        pdf.set_fill_color(*bg_color)
+        pdf.cell(
+            self.COL_WIDTHS['name'], self.ROW_HEIGHT, 
+            name, border=1, align='L', fill=True
+        )
+        
+        # Actual days cell
+        pdf.cell(
+            self.COL_WIDTHS['actual_days'], self.ROW_HEIGHT,
+            actual_days, border=1, align='C', fill=True
+        )
+        
+        # Rate cell - colored by tier
         pdf.set_fill_color(*rate_color)
-        pdf.cell(rate_width, row_height * 2, f'{attendance.attendance_rate:.0f}%', 
-                 border=1, align='C', fill=True)
-        pdf.ln()
-        
-        # Out times row
-        pdf.set_x(x_after_name)
-        for day in range(1, days_in_month + 1):
-            record = records_by_day.get(day)
-            if record and record.check_out:
-                time_str = record.check_out.strftime('%H:%M')
-                fill_color = self._get_status_color(record, is_in=False)
-                if fill_color:
-                    pdf.set_fill_color(*fill_color)
-                    pdf.cell(day_width, row_height, time_str, border=1, align='C', fill=True)
-                else:
-                    pdf.cell(day_width, row_height, time_str, border=1, align='C')
-            else:
-                pdf.cell(day_width, row_height, '-', border=1, align='C')
+        pdf.cell(
+            self.COL_WIDTHS['rate'], self.ROW_HEIGHT,
+            rate_str, border=1, align='C', fill=True
+        )
         
         pdf.ln()
     
-    def _get_status_color(
-        self,
-        record: AttendanceRecord,
-        is_in: bool
-    ) -> Optional[tuple]:
-        """Get fill color based on attendance status."""
-        if record.status == AttendanceStatus.NORMAL:
-            return self.COLORS['green']
-        elif record.status in (AttendanceStatus.LATE, AttendanceStatus.EARLY_LEAVE, 
-                               AttendanceStatus.ABNORMAL):
-            return self.COLORS['red']
-        return None
-    
-    def _get_rate_color(self, rate_tier: RateColorTier) -> tuple:
-        """Get color for attendance rate tier."""
+    def _get_rate_color(self, rate_tier: RateColorTier) -> Tuple[int, int, int]:
+        """Map RateColorTier enum to RGB color tuple."""
         if rate_tier == RateColorTier.GREEN:
             return self.COLORS['green']
         elif rate_tier == RateColorTier.YELLOW:
@@ -233,6 +325,9 @@ class PdfWriter:
             return self.COLORS['red']
 
 
+# ==============================================================================
+# Utility Functions
+# ==============================================================================
 def format_filename(pattern: str, year: int, month: int, report_type: str = "") -> str:
     """
     Format filename pattern with placeholders.

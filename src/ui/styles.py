@@ -35,7 +35,7 @@ class DarkTheme(Theme):
     @property
     def stylesheet(self) -> str:
         return """
-            QMainWindow {
+            QMainWindow, QDialog {
                 background-color: #1e1e1e;
             }
             QWidget {
@@ -143,6 +143,34 @@ class DarkTheme(Theme):
                 border-right: 4px solid transparent;
                 border-top: 5px solid #e0e0e0;
             }
+            QComboBox {
+                background-color: #3c3c3c;
+                border: 1px solid #3e3e42;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #f0f0f0;
+                selection-background-color: #264f78;
+            }
+            QComboBox:hover {
+                border: 1px solid #0078d4;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #e0e0e0;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #252526;
+                color: #e0e0e0;
+                selection-background-color: #37373d;
+                border: 1px solid #3e3e42;
+                outline: none;
+            }
             QPushButton {
                 background-color: #0078d4;
                 color: white;
@@ -186,7 +214,7 @@ class ClassicWhiteTheme(Theme):
     @property
     def stylesheet(self) -> str:
         return """
-            QMainWindow {
+            QMainWindow, QDialog {
                 background-color: #f0f0f0;
             }
             QWidget {
@@ -207,7 +235,7 @@ class ClassicWhiteTheme(Theme):
                 left: 12px;
                 padding: 0 5px;
                 color: #003399;
-                background-color: transparent;
+                background-color: #ffffff;
             }
             QListWidget {
                 background-color: #ffffff;
@@ -296,6 +324,35 @@ class ClassicWhiteTheme(Theme):
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
                 border-top: 5px solid #444444;
+            }
+            QComboBox {
+                background-color: #ffffff;
+                border: 1px solid #c0c0c0;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #000000;
+                selection-background-color: #cce8ff;
+            }
+            QComboBox:hover {
+                border: 1px solid #0078d4;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #444444;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #ffffff;
+                color: #000000;
+                selection-background-color: #cce8ff;
+                selection-color: #000000;
+                border: 1px solid #c0c0c0;
+                outline: none;
             }
             QPushButton {
                 background-color: #0078d4;

@@ -66,18 +66,27 @@ class RateCalculator:
         
         return required
     
-    def calculate_actual_days(self, records: List[AttendanceRecord]) -> int:
+    def calculate_actual_days(
+        self, 
+        records: List[AttendanceRecord],
+        work_days: Set[int] = None
+    ) -> int:
         """
         Calculate actual attendance days from records.
         
         Args:
             records: List of attendance records
+            work_days: Optional set of day numbers (1-31) that are work days.
+                       If provided, only records on these days are counted.
             
         Returns:
             Number of days with valid attendance
         """
         actual = 0
         for record in records:
+            # 如果有指定工作日，只計算工作日的出勤
+            if work_days is not None and record.date.day not in work_days:
+                continue
             if record.status in (
                 AttendanceStatus.NORMAL,
                 AttendanceStatus.LATE,
@@ -131,7 +140,8 @@ class RateCalculator:
         records: List[AttendanceRecord],
         year: int,
         month: int,
-        threshold: int = 80
+        threshold: int = 80,
+        work_days: Set[int] = None
     ) -> MonthlyAttendance:
         """
         Calculate complete monthly attendance for a staff member.
@@ -142,12 +152,14 @@ class RateCalculator:
             year: Year
             month: Month
             threshold: Rate threshold for color grading
+            work_days: Optional set of day numbers (1-31) that are work days.
+                       If provided, only records on these days are counted for statistics.
             
         Returns:
             MonthlyAttendance with all calculations
         """
         required_days = self.calculate_required_days(staff, year, month)
-        actual_days = self.calculate_actual_days(records)
+        actual_days = self.calculate_actual_days(records, work_days=work_days)
         rate = self.calculate_rate(actual_days, required_days)
         rate_color = self.get_rate_color(rate, threshold)
         

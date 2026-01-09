@@ -38,13 +38,31 @@ class ExcelWriter:
     - 3-tier color for attendance rates
     """
     
-    # Color definitions
+    # Color definitions (支援所有設定中可用的顏色)
     COLORS = {
         'green': PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid'),
         'red': PatternFill(start_color='FF6B6B', end_color='FF6B6B', fill_type='solid'),
         'yellow': PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid'),
+        'orange': PatternFill(start_color='FFA500', end_color='FFA500', fill_type='solid'),
+        'blue': PatternFill(start_color='6B8CFF', end_color='6B8CFF', fill_type='solid'),
+        'purple': PatternFill(start_color='DDA0DD', end_color='DDA0DD', fill_type='solid'),
+        'pink': PatternFill(start_color='FFB6C1', end_color='FFB6C1', fill_type='solid'),
+        'black': PatternFill(start_color='333333', end_color='333333', fill_type='solid'),
         'gray': PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid'),
         'header': PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid'),
+    }
+    
+    # Hex 色碼到顏色名稱的映射 (用於處理 config 中的 hex 格式)
+    HEX_TO_NAME = {
+        '#90EE90': 'green', '#90ee90': 'green',
+        '#FF6B6B': 'red', '#ff6b6b': 'red',
+        '#FFD700': 'yellow', '#ffd700': 'yellow',
+        '#FFA500': 'orange', '#ffa500': 'orange',
+        '#6B8CFF': 'blue', '#6b8cff': 'blue',
+        '#DDA0DD': 'purple', '#dda0dd': 'purple',
+        '#FFB6C1': 'pink', '#ffb6c1': 'pink',
+        '#333333': 'black',
+        '#D3D3D3': 'gray', '#d3d3d3': 'gray',
     }
     
     BORDER = Border(
@@ -54,10 +72,46 @@ class ExcelWriter:
         bottom=Side(style='thin')
     )
     
+    # 粗邊框用於每個人的外框
+    THICK_SIDE = Side(style='medium')
+    THIN_SIDE = Side(style='thin')
+    
     def __init__(self, color_logic: ColorLogic = None, time_rule: TimeRule = None):
         self.color_logic = color_logic or ColorLogic()
         self.time_rule = time_rule or TimeRule()
         self.wb: Optional[Workbook] = None
+    
+    def _get_fill(self, color_value: str) -> Optional[PatternFill]:
+        """Get PatternFill from color value (name or hex code).
+        
+        Args:
+            color_value: Color name ('green', 'red') or hex code ('#90EE90')
+            
+        Returns:
+            PatternFill object or None if color is invalid/none/transparent
+        """
+        if not color_value or color_value in ('none', 'transparent'):
+            return None
+        
+        # 直接是顏色名稱
+        if color_value in self.COLORS:
+            return self.COLORS[color_value]
+        
+        # 如果是 hex 碼，嘗試轉換為顏色名稱
+        if color_value in self.HEX_TO_NAME:
+            color_name = self.HEX_TO_NAME[color_value]
+            return self.COLORS[color_name]
+        
+        return None
+    
+    def _is_dark_color(self, color_value: str) -> bool:
+        """Check if color is dark (needs white text)."""
+        if color_value in ('black', 'blue', 'purple'):
+            return True
+        # 處理 hex 格式
+        if color_value in self.HEX_TO_NAME:
+            return self.HEX_TO_NAME[color_value] in ('black', 'blue', 'purple')
+        return False
     
     def create_report(
         self,
@@ -231,15 +285,48 @@ class ExcelWriter:
                 out_cell.alignment = Alignment(horizontal='center')
                 
                 if record:
-                    if record.check_in:
+                    has_in = record.check_in is not None
+                    has_out = record.check_out is not None
+                    
+                    if has_in and has_out:
+                        # 兩個都有打卡，正常顯示時間
                         in_cell.value = record.check_in.strftime('%H:%M')
-                    if record.check_out:
                         out_cell.value = record.check_out.strftime('%H:%M')
-                    self._apply_status_colors(in_cell, out_cell, record)
+                        self._apply_status_colors(in_cell, out_cell, record)
+                    
+                    elif has_in and not has_out:
+                        # 有打上班、沒打下班 → 缺少下班打卡紀錄
+                        in_cell.value = record.check_in.strftime('%H:%M')
+                        out_cell.value = self.color_logic.missing_punch_text
+                        self._apply_status_colors(in_cell, out_cell, record)
+                        self._apply_missing_punch_color(out_cell)
+                    
+                    elif not has_in and has_out:
+                        # 沒打上班、有打下班 → 缺少上班打卡紀錄
+                        in_cell.value = self.color_logic.missing_punch_text
+                        out_cell.value = record.check_out.strftime('%H:%M')
+                        self._apply_missing_punch_color(in_cell)
+                        self._apply_status_colors(in_cell, out_cell, record)
+                    
+                    else:
+                        # 兩個都沒打 (record 存在但無打卡) → 曠職
+                        in_cell.value = self.color_logic.absent_text
+                        out_cell.value = self.color_logic.absent_text
+                        self._apply_absent_color(in_cell)
+                        self._apply_absent_color(out_cell)
+                else:
+                    # 完全沒有 record → 曠職
+                    in_cell.value = self.color_logic.absent_text
+                    out_cell.value = self.color_logic.absent_text
+                    self._apply_absent_color(in_cell)
+                    self._apply_absent_color(out_cell)
             
-            # Generate remarks based on status
+            # Generate remarks based on status (only for work days)
             remark_items = []
-            for record in monthly.records:
+            for day in work_days:
+                record = records_by_day.get(day)
+                if not record:
+                    continue
                 if record.status == AttendanceStatus.LATE:
                     remark_items.append(f"{record.date.day}日遲到")
                 elif record.status == AttendanceStatus.EARLY_LEAVE:
@@ -276,6 +363,9 @@ class ExcelWriter:
             else:
                 rate_cell.fill = self.COLORS['red']
             
+            # 為每個人的兩列套用粗外框
+            self._apply_person_border(ws, in_row, out_row, rate_col)
+            
             current_row += 2
         
         # Adjust column widths
@@ -283,37 +373,74 @@ class ExcelWriter:
         for col in range(2, num_work_days + 2):
             ws.column_dimensions[get_column_letter(col)].width = 7
         ws.column_dimensions[get_column_letter(remarks_col)].width = 20
-        ws.column_dimensions[get_column_letter(actual_col)].width = 10
+        ws.column_dimensions[get_column_letter(actual_col)].width = 14
         ws.column_dimensions[get_column_letter(rate_col)].width = 8
         
         # Set header row height for rotated date text
-        ws.row_dimensions[1].height = 70
+        ws.row_dimensions[1].height = 50
     
     def _apply_status_colors(self, in_cell, out_cell, record: AttendanceRecord):
         """Apply colors based on attendance status and color_logic settings."""
         if record.status == AttendanceStatus.NORMAL:
-            if self.color_logic.green_normal_in and record.check_in:
-                in_cell.fill = self.COLORS['green']
-            if self.color_logic.green_normal_out and record.check_out:
-                out_cell.fill = self.COLORS['green']
+            # 使用新的顏色字串屬性
+            if record.check_in:
+                fill = self._get_fill(self.color_logic.normal_in_color)
+                if fill:
+                    in_cell.fill = fill
+            if record.check_out:
+                fill = self._get_fill(self.color_logic.normal_out_color)
+                if fill:
+                    out_cell.fill = fill
         
         elif record.status == AttendanceStatus.LATE:
-            if self.color_logic.red_abnormal_in:
-                in_cell.fill = self.COLORS['red']
-            if self.color_logic.green_normal_out and record.check_out:
-                out_cell.fill = self.COLORS['green']
+            # 上班遲到用異常顏色，下班正常用正常顏色
+            fill = self._get_fill(self.color_logic.abnormal_in_color)
+            if fill:
+                in_cell.fill = fill
+            if record.check_out:
+                fill = self._get_fill(self.color_logic.normal_out_color)
+                if fill:
+                    out_cell.fill = fill
         
         elif record.status == AttendanceStatus.EARLY_LEAVE:
-            if self.color_logic.green_normal_in and record.check_in:
-                in_cell.fill = self.COLORS['green']
-            if self.color_logic.red_abnormal_out:
-                out_cell.fill = self.COLORS['red']
+            # 上班正常用正常顏色，下班早退用異常顏色
+            if record.check_in:
+                fill = self._get_fill(self.color_logic.normal_in_color)
+                if fill:
+                    in_cell.fill = fill
+            fill = self._get_fill(self.color_logic.abnormal_out_color)
+            if fill:
+                out_cell.fill = fill
         
         elif record.status in (AttendanceStatus.ABNORMAL, AttendanceStatus.ABSENT):
-            if self.color_logic.red_abnormal_in and record.check_in:
-                in_cell.fill = self.COLORS['red']
-            if self.color_logic.red_abnormal_out and record.check_out:
-                out_cell.fill = self.COLORS['red']
+            if record.check_in:
+                fill = self._get_fill(self.color_logic.abnormal_in_color)
+                if fill:
+                    in_cell.fill = fill
+            if record.check_out:
+                fill = self._get_fill(self.color_logic.abnormal_out_color)
+                if fill:
+                    out_cell.fill = fill
+    
+    def _apply_missing_punch_color(self, cell):
+        """Apply missing punch color based on color_logic settings."""
+        color = self.color_logic.missing_punch_color
+        fill = self._get_fill(color)
+        if fill:
+            cell.fill = fill
+            # 如果是深色背景，使用白色文字
+            if self._is_dark_color(color):
+                cell.font = Font(color='FFFFFF')
+    
+    def _apply_absent_color(self, cell):
+        """Apply absent color based on color_logic settings."""
+        color = self.color_logic.absent_color
+        fill = self._get_fill(color)
+        if fill:
+            cell.fill = fill
+            # 如果是深色背景，使用白色文字
+            if self._is_dark_color(color):
+                cell.font = Font(color='FFFFFF')
     
     def apply_custom_colors(
         self,
@@ -340,3 +467,37 @@ class ExcelWriter:
         
         if out_color and out_color in self.COLORS:
             ws.cell(row + 1, col).fill = self.COLORS[out_color]
+    
+    def _apply_person_border(self, ws, in_row: int, out_row: int, last_col: int):
+        """
+        為每個人的兩列套用粗外框線。
+        
+        Args:
+            ws: Worksheet
+            in_row: 上班時間列 (第一列)
+            out_row: 下班時間列 (第二列)
+            last_col: 最後一欄的欄號
+        """
+        for col in range(1, last_col + 1):
+            in_cell = ws.cell(in_row, col)
+            out_cell = ws.cell(out_row, col)
+            
+            # 取得現有邊框設定
+            in_existing = in_cell.border
+            out_existing = out_cell.border
+            
+            # 上列：上邊粗線，左右根據位置
+            in_cell.border = Border(
+                top=self.THICK_SIDE,
+                bottom=in_existing.bottom if in_existing else self.THIN_SIDE,
+                left=self.THICK_SIDE if col == 1 else self.THIN_SIDE,
+                right=self.THICK_SIDE if col == last_col else self.THIN_SIDE
+            )
+            
+            # 下列：下邊粗線，左右根據位置
+            out_cell.border = Border(
+                top=out_existing.top if out_existing else self.THIN_SIDE,
+                bottom=self.THICK_SIDE,
+                left=self.THICK_SIDE if col == 1 else self.THIN_SIDE,
+                right=self.THICK_SIDE if col == last_col else self.THIN_SIDE
+            )

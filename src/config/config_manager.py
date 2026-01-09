@@ -14,7 +14,23 @@ import os
 
 @dataclass
 class ColorLogic:
-    """Color logic settings for attendance marking."""
+    """Color logic settings for attendance marking.
+    
+    Color values: 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'black', 'none'
+    """
+    # 打卡顏色設定 (改為顏色字串)
+    normal_in_color: str = "green"       # 正常上班打卡顏色
+    normal_out_color: str = "green"      # 正常下班打卡顏色
+    abnormal_in_color: str = "red"       # 異常上班打卡顏色
+    abnormal_out_color: str = "red"      # 異常下班打卡顏色
+    
+    # 缺卡與曠職設定
+    missing_punch_color: str = "black"   # 當日缺少打卡紀錄顏色
+    missing_punch_text: str = "*"        # 缺少打卡紀錄標記文字
+    absent_color: str = "none"           # 曠職標記顏色
+    absent_text: str = "-"               # 曠職標記文字
+    
+    # 保留舊欄位以維持向後相容 (讀取舊 config 時自動轉換)
     green_normal_in: bool = True
     green_normal_out: bool = True
     red_abnormal_in: bool = True
@@ -70,7 +86,19 @@ class OutputSettings:
     """Output settings for generated report."""
     output_dir: str = ""  # Default empty = project root
     filename_pattern: str = "Attendance_{year}_{month}.xlsx"
-    generate_pdf: bool = False
+    generate_pdf: bool = True  # 預設開啟
+    
+    # 輸出排序設定
+    sort_by: str = "attendance_rate"  # 排序依據: "attendance_rate" 或 "name_strokes"
+    
+    # PDF 輸出設定
+    separate_pdf: bool = True  # True=分開生成內外勤PDF, False=合併為一份
+    pdf_output_dir: str = ""   # PDF 輸出路徑，空字串=跟 xlsx 同目錄
+    pdf_filename_pattern: str = "出勤報表_{year}_{month}.pdf"  # 合併時使用的檔名
+    
+    # PDF filename patterns (支援 {year}, {month} 佔位符)
+    internal_pdf_pattern: str = "內勤出勤報表_{year}_{month}.pdf"
+    external_pdf_pattern: str = "外勤出勤報表_{year}_{month}.pdf"
 
 
 @dataclass
@@ -160,6 +188,15 @@ class ConfigManager:
             },
             "ui_prefs": {
                 "color_logic": {
+                    "normal_in_color": config.ui_prefs.color_logic.normal_in_color,
+                    "normal_out_color": config.ui_prefs.color_logic.normal_out_color,
+                    "abnormal_in_color": config.ui_prefs.color_logic.abnormal_in_color,
+                    "abnormal_out_color": config.ui_prefs.color_logic.abnormal_out_color,
+                    "missing_punch_color": config.ui_prefs.color_logic.missing_punch_color,
+                    "missing_punch_text": config.ui_prefs.color_logic.missing_punch_text,
+                    "absent_color": config.ui_prefs.color_logic.absent_color,
+                    "absent_text": config.ui_prefs.color_logic.absent_text,
+                    # 保留舊欄位以維持向後相容
                     "green_normal_in": config.ui_prefs.color_logic.green_normal_in,
                     "green_normal_out": config.ui_prefs.color_logic.green_normal_out,
                     "red_abnormal_in": config.ui_prefs.color_logic.red_abnormal_in,
@@ -171,7 +208,13 @@ class ConfigManager:
             "output_settings": {
                 "output_dir": config.output_settings.output_dir,
                 "filename_pattern": config.output_settings.filename_pattern,
-                "generate_pdf": config.output_settings.generate_pdf
+                "generate_pdf": config.output_settings.generate_pdf,
+                "sort_by": config.output_settings.sort_by,
+                "separate_pdf": config.output_settings.separate_pdf,
+                "pdf_output_dir": config.output_settings.pdf_output_dir,
+                "pdf_filename_pattern": config.output_settings.pdf_filename_pattern,
+                "internal_pdf_pattern": config.output_settings.internal_pdf_pattern,
+                "external_pdf_pattern": config.output_settings.external_pdf_pattern
             }
         }
     
@@ -218,6 +261,15 @@ class ConfigManager:
         color_logic_data = ui_prefs_data.get("color_logic", {})
         ui_prefs = UIPrefs(
             color_logic=ColorLogic(
+                normal_in_color=color_logic_data.get("normal_in_color", "green"),
+                normal_out_color=color_logic_data.get("normal_out_color", "green"),
+                abnormal_in_color=color_logic_data.get("abnormal_in_color", "red"),
+                abnormal_out_color=color_logic_data.get("abnormal_out_color", "red"),
+                missing_punch_color=color_logic_data.get("missing_punch_color", "black"),
+                missing_punch_text=color_logic_data.get("missing_punch_text", "*"),
+                absent_color=color_logic_data.get("absent_color", "none"),
+                absent_text=color_logic_data.get("absent_text", "-"),
+                # 保留舊欄位以維持向後相容
                 green_normal_in=color_logic_data.get("green_normal_in", True),
                 green_normal_out=color_logic_data.get("green_normal_out", True),
                 red_abnormal_in=color_logic_data.get("red_abnormal_in", True),
@@ -232,7 +284,13 @@ class ConfigManager:
         output_settings = OutputSettings(
             output_dir=output_settings_data.get("output_dir", ""),
             filename_pattern=output_settings_data.get("filename_pattern", "Attendance_{year}_{month}.xlsx"),
-            generate_pdf=output_settings_data.get("generate_pdf", False)
+            generate_pdf=output_settings_data.get("generate_pdf", True),
+            sort_by=output_settings_data.get("sort_by", "attendance_rate"),
+            separate_pdf=output_settings_data.get("separate_pdf", True),
+            pdf_output_dir=output_settings_data.get("pdf_output_dir", ""),
+            pdf_filename_pattern=output_settings_data.get("pdf_filename_pattern", "出勤報表_{year}_{month}.pdf"),
+            internal_pdf_pattern=output_settings_data.get("internal_pdf_pattern", "內勤出勤報表_{year}_{month}.pdf"),
+            external_pdf_pattern=output_settings_data.get("external_pdf_pattern", "外勤出勤報表_{year}_{month}.pdf")
         )
         
         return AppConfig(

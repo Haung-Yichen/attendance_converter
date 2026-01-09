@@ -124,6 +124,11 @@ class MainWindow(QMainWindow):
             theme_menu.addAction(action)
             theme_group.addAction(action)
 
+        # Settings action (在「幫助」左邊)
+        settings_action = QAction("設定", self)
+        settings_action.triggered.connect(self._on_open_settings)
+        menubar.addAction(settings_action)
+
         # Help menu
         help_menu = menubar.addMenu("幫助")
         
@@ -162,6 +167,7 @@ class MainWindow(QMainWindow):
         internal_layout = QVBoxLayout(internal_group)
         self.internal_list = QListWidget()
         self.internal_list.setMinimumHeight(100)
+        self.internal_list.setFont(QFont("Microsoft JhengHei", 12))
         internal_layout.addWidget(self.internal_list)
         layout.addWidget(internal_group, stretch=1)
         
@@ -170,6 +176,7 @@ class MainWindow(QMainWindow):
         external_layout = QVBoxLayout(external_group)
         self.external_list = QListWidget()
         self.external_list.setMinimumHeight(100)
+        self.external_list.setFont(QFont("Microsoft JhengHei", 12))
         external_layout.addWidget(self.external_list)
         layout.addWidget(external_group, stretch=1)
 
@@ -243,27 +250,6 @@ class MainWindow(QMainWindow):
         time_layout.addWidget(self.external_out_end, 1, 7)
         
         layout.addWidget(time_group, stretch=0)
-        
-        # Color logic checkboxes
-        color_layout = QHBoxLayout()
-        
-        # Left column - green options
-        green_col = QVBoxLayout()
-        self.chk_green_in = QCheckBox("正常打上班卡標記綠色")
-        self.chk_green_out = QCheckBox("正常打下班卡標記綠色")
-        green_col.addWidget(self.chk_green_in)
-        green_col.addWidget(self.chk_green_out)
-        color_layout.addLayout(green_col)
-        
-        # Right column - red options
-        red_col = QVBoxLayout()
-        self.chk_red_in = QCheckBox("超過上班時間打卡標記紅色")
-        self.chk_red_out = QCheckBox("超過下班時間打卡標記紅色")
-        red_col.addWidget(self.chk_red_in)
-        red_col.addWidget(self.chk_red_out)
-        color_layout.addLayout(red_col)
-        
-        layout.addLayout(color_layout)
         
         # Middle row: Attendance Rate + Stats
         middle_layout = QHBoxLayout()
@@ -445,6 +431,14 @@ class MainWindow(QMainWindow):
         self.config_manager.save()
         self._apply_styles()
     
+    def _on_open_settings(self):
+        """Handle settings menu action - open settings dialog."""
+        from ui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self.config, self)
+        if dialog.exec():
+            # Settings were saved by dialog, persist to file
+            self.config_manager.save()
+    
     def _connect_signals(self):
         """Connect UI signals to handlers."""
         # Button signals
@@ -453,10 +447,6 @@ class MainWindow(QMainWindow):
         self.btn_convert.clicked.connect(self._on_convert)
         
         # Auto-save on settings change
-        self.chk_green_in.stateChanged.connect(self._on_settings_changed)
-        self.chk_green_out.stateChanged.connect(self._on_settings_changed)
-        self.chk_red_in.stateChanged.connect(self._on_settings_changed)
-        self.chk_red_out.stateChanged.connect(self._on_settings_changed)
         self.rate_threshold.valueChanged.connect(self._on_settings_changed)
         
         # Time edits
@@ -468,7 +458,6 @@ class MainWindow(QMainWindow):
         ]:
             edit.timeChanged.connect(self._on_settings_changed)
         
-        # Output pattern fields
         # Output settings
         self.chk_generate_pdf.stateChanged.connect(self._on_settings_changed)
     
@@ -486,12 +475,6 @@ class MainWindow(QMainWindow):
         self._set_time_edit(self.external_in_end, config.time_rules.external.in_end)
         self._set_time_edit(self.external_out_start, config.time_rules.external.out_start)
         self._set_time_edit(self.external_out_end, config.time_rules.external.out_end)
-        
-        # Color logic
-        self.chk_green_in.setChecked(config.ui_prefs.color_logic.green_normal_in)
-        self.chk_green_out.setChecked(config.ui_prefs.color_logic.green_normal_out)
-        self.chk_red_in.setChecked(config.ui_prefs.color_logic.red_abnormal_in)
-        self.chk_red_out.setChecked(config.ui_prefs.color_logic.red_abnormal_out)
         
         # Rate threshold
         self.rate_threshold.setValue(config.ui_prefs.rate_threshold)
@@ -528,12 +511,6 @@ class MainWindow(QMainWindow):
         config.time_rules.external.in_end = self._get_time_str(self.external_in_end)
         config.time_rules.external.out_start = self._get_time_str(self.external_out_start)
         config.time_rules.external.out_end = self._get_time_str(self.external_out_end)
-        
-        # Color logic
-        config.ui_prefs.color_logic.green_normal_in = self.chk_green_in.isChecked()
-        config.ui_prefs.color_logic.green_normal_out = self.chk_green_out.isChecked()
-        config.ui_prefs.color_logic.red_abnormal_in = self.chk_red_in.isChecked()
-        config.ui_prefs.color_logic.red_abnormal_out = self.chk_red_out.isChecked()
         
         # Rate threshold
         config.ui_prefs.rate_threshold = self.rate_threshold.value()
@@ -1036,6 +1013,20 @@ class MainWindow(QMainWindow):
         classifier = StaffClassifier()
         classifier.load_from_csv(Path(self.config.paths.staff_csv))
         
+        # Build holidays set from config (moved before loop to calculate work_days)
+        holidays_set = set()
+        for date_str in self.config.holidays.custom_dates:
+            try:
+                # Expect format: YYYY-MM-DD
+                parts = date_str.split('-')
+                holidays_set.add(date(int(parts[0]), int(parts[1]), int(parts[2])))
+            except (ValueError, IndexError):
+                pass
+        
+        # Get number of days in this month
+        from calendar import monthrange
+        _, num_days = monthrange(year, month)
+        
         # Calculate attendance with strict matching
         rate_calc = RateCalculator()
         
@@ -1066,10 +1057,18 @@ class MainWindow(QMainWindow):
                 record.status = strategy.determine_status(record, time_rule)
                 record.remark = strategy.get_remark(record, time_rule)
             
-            # Calculate monthly attendance
+            # Calculate work days for this staff member (based on staff type)
+            work_days_set = set()
+            for day in range(1, num_days + 1):
+                d = date(year, month, day)
+                if staff.should_work_on(d) and d not in holidays_set:
+                    work_days_set.add(day)
+            
+            # Calculate monthly attendance with work_days filter
             monthly = rate_calc.calculate_monthly_attendance(
                 staff, records, year, month,
-                self.config.ui_prefs.rate_threshold
+                self.config.ui_prefs.rate_threshold,
+                work_days=work_days_set
             )
             
             if staff.staff_type == StaffType.INTERNAL:
@@ -1087,18 +1086,13 @@ class MainWindow(QMainWindow):
             else:
                 raise ValueError("沒有任何人員資料可供處理")
         
-        # Generate Excel
+        # Apply sorting based on config setting
+        from domain.sorting import sort_attendance_list
+        sort_by = self.config.output_settings.sort_by
+        internal_attendance = sort_attendance_list(internal_attendance, sort_by)
+        external_attendance = sort_attendance_list(external_attendance, sort_by)
         
-        # Build holidays set from config
-        holidays_set = set()
-        for date_str in self.config.holidays.custom_dates:
-            try:
-                # Expect format: YYYY-MM-DD
-                parts = date_str.split('-')
-                holidays_set.add(date(int(parts[0]), int(parts[1]), int(parts[2])))
-            except (ValueError, IndexError):
-                pass
-
+        # Generate Excel (holidays_set already built above)
         writer = ExcelWriter(self.config.ui_prefs.color_logic)
         writer.create_report(
             internal_attendance,
@@ -1113,26 +1107,45 @@ class MainWindow(QMainWindow):
             from infrastructure.pdf_writer import PdfWriter, format_filename
             
             pdf_writer = PdfWriter()
-            output_dir = output_path.parent
             
-            # Generate internal PDF
-            if internal_attendance:
-                internal_pdf_pattern = self.config.output_settings.internal_pdf_pattern
-                internal_filename = format_filename(internal_pdf_pattern, year, month)
-                internal_pdf_path = output_dir / internal_filename
-                pdf_writer.create_report(
-                    internal_attendance, year, month,
-                    internal_pdf_path, "internal"
-                )
+            # Determine PDF output directory
+            pdf_output_dir = self.config.output_settings.pdf_output_dir
+            if pdf_output_dir:
+                pdf_dir = Path(pdf_output_dir)
+            else:
+                pdf_dir = output_path.parent
             
-            # Generate external PDF
-            if external_attendance:
-                external_pdf_pattern = self.config.output_settings.external_pdf_pattern
-                external_filename = format_filename(external_pdf_pattern, year, month)
-                external_pdf_path = output_dir / external_filename
-                pdf_writer.create_report(
-                    external_attendance, year, month,
-                    external_pdf_path, "external"
+            # Ensure PDF output dir exists
+            pdf_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Check if separate or combined PDF
+            if self.config.output_settings.separate_pdf:
+                # Generate separate PDFs for internal and external
+                if internal_attendance:
+                    internal_pdf_pattern = self.config.output_settings.internal_pdf_pattern
+                    internal_filename = format_filename(internal_pdf_pattern, year, month)
+                    internal_pdf_path = pdf_dir / internal_filename
+                    pdf_writer.create_report(
+                        internal_attendance, year, month,
+                        internal_pdf_path, "internal"
+                    )
+                
+                if external_attendance:
+                    external_pdf_pattern = self.config.output_settings.external_pdf_pattern
+                    external_filename = format_filename(external_pdf_pattern, year, month)
+                    external_pdf_path = pdf_dir / external_filename
+                    pdf_writer.create_report(
+                        external_attendance, year, month,
+                        external_pdf_path, "external"
+                    )
+            else:
+                # Generate combined PDF
+                combined_pattern = self.config.output_settings.pdf_filename_pattern
+                combined_filename = format_filename(combined_pattern, year, month)
+                combined_pdf_path = pdf_dir / combined_filename
+                pdf_writer.create_combined_report(
+                    internal_attendance, external_attendance,
+                    year, month, combined_pdf_path
                 )
         
         return skipped_names

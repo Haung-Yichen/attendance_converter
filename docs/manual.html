@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>操作說明 - 701Client 出勤報表轉換器</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --accent: #38bdf8;
+            --accent-hover: #0ea5e9;
+            --border-color: #334155;
+            --font-family: 'Inter', system-ui, -apple-system, "Microsoft JhengHei", sans-serif;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            margin-top: 2.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            background-color: var(--accent);
+            color: #000;
+            font-size: 0.8rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 1.5rem;
+        }
+
+        .card h3 {
+            margin-top: 0;
+            color: var(--accent);
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .feature-list li {
+            margin-bottom: 0.75rem;
+            padding-left: 1.5rem;
+            position: relative;
+        }
+
+        .feature-list li::before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: var(--accent);
+        }
+
+        .step-list {
+            counter-reset: step;
+            list-style: none;
+            padding: 0;
+        }
+
+        .step-item {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            position: relative;
+            padding-left: 4rem;
+        }
+
+        .step-item::before {
+            counter-increment: step;
+            content: counter(step);
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 2rem;
+            height: 2rem;
+            background-color: var(--accent);
+            color: #0f172a;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 2rem;
+            font-weight: bold;
+        }
+
+        strong {
+            color: #fff;
+        }
+
+        .highlight {
+            background-color: rgba(56, 189, 248, 0.15);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            color: var(--accent);
+            font-family: monospace;
+        }
+
+        footer {
+            margin-top: 4rem;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>APP 操作說明</h1>
+            <p style="color: var(--text-secondary);">701Client 出勤報表轉換器功能指南</p>
+        </header>
+
+        <section>
+            <h2>�️ 介面概覽</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>1. 設定區 (左側)</h3>
+                    <ul class="feature-list">
+                        <li><strong>上下班時間</strong>：設定內勤與外勤人員的標準打卡時間區間。</li>
+                        <li><strong>出席率標準</strong>：調整「出席率」百分比門檻（低於此數值將顯示為紅色）。</li>
+                        <li><strong>輸出路徑</strong>：指定報表產生的資料夾位置。</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>2. 人員名單區 (右側)</h3>
+                    <ul class="feature-list">
+                        <li>顯示目前系統已載入的「內勤」與「外勤」人員清單。</li>
+                        <li>上方會即時統計各類別的人數。</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>3. 操作區 (底部)</h3>
+                    <ul class="feature-list">
+                        <li><strong>匯入請假名單</strong>：載入請假紀錄 Excel。</li>
+                        <li><strong>選擇檔案</strong>：選取要處理的考勤來源檔。</li>
+                        <li><strong>轉換</strong>：執行報表製作的核心按鈕。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>⚡ 操作流程</h2>
+            <div class="step-list">
+                <div class="step-item">
+                    <strong>確認設定</strong>
+                    <br>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem;">
+                        開啟 App 後，請先確認左側的「上下班時間」與「出席率標準」是否符合本次需求。
+                    </span>
+                </div>
+                <div class="step-item">
+                    <strong>匯入資料 (可選)</strong>
+                    <br>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem;">
+                        若需計算請假，點擊 <span class="highlight">匯入請假名單</span>；若需更新人員，使用選單列的 <span class="highlight">檔案 >
+                            匯入人員名單</span>。
+                    </span>
+                </div>
+                <div class="step-item">
+                    <strong>執行轉換</strong>
+                    <br>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem;">
+                        點擊底部的 <span class="highlight">選擇檔案</span> 選取來源 Excel，確認無誤後點擊綠色的 <span
+                            class="highlight">轉換</span> 按鈕。
+                    </span>
+                </div>
+                <div class="step-item">
+                    <strong>處理未分類人員 (如有)</strong>
+                    <br>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem;">
+                        若遇到來源檔中有新進人員，App 會彈出視窗詢問。請直接點選該員屬於 <strong>內勤</strong> 或 <strong>外勤</strong>，系統將自動記憶並完成轉換。
+                    </span>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>�️ 進階功能</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>PDF 生成</h3>
+                    <p style="color: var(--text-secondary);">
+                        勾選左下角的 <span class="highlight">生成 PDF</span>，程式將在產出 Excel 報表的同時，額外產生一份易於列印的 PDF 總表。
+                    </p>
+                </div>
+                <div class="card">
+                    <h3>主題切換</h3>
+                    <p style="color: var(--text-secondary);">
+                        透過上方選單列的 <span class="highlight">主題</span>，可切換 <strong>Dark (深色模式)</strong> 或 <strong>Classic
+                            White (淺色模式)</strong> 以適應不同環境光線。
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            Created for 701Client Converter
+        </footer>
+    </div>
+</body>
+
+</html>

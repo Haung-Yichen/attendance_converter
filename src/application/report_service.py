@@ -253,10 +253,18 @@ class AttendanceReportService:
         year: int,
         month: int
     ) -> None:
-        """Generate PDF reports based on configuration."""
+        """Generate PDF report with Excel-like formatting.
+        
+        Always generates a combined PDF with internal staff first,
+        then external staff on a new page.
+        """
         from infrastructure.pdf_writer import PdfWriter, format_filename
         
-        pdf_writer = PdfWriter(custom_font_path=params.custom_font_path)
+        # Create PdfWriter with color_logic for proper color coding
+        pdf_writer = PdfWriter(
+            color_logic=params.color_logic,
+            custom_font_path=params.custom_font_path
+        )
         
         # Determine PDF output directory
         if params.pdf_output_dir:
@@ -267,37 +275,19 @@ class AttendanceReportService:
         # Ensure PDF output dir exists
         pdf_dir.mkdir(parents=True, exist_ok=True)
         
-        if params.separate_pdf:
-            # Generate separate PDFs for internal and external
-            if internal_attendance:
-                internal_filename = format_filename(params.internal_pdf_pattern, year, month)
-                internal_pdf_path = pdf_dir / internal_filename
-                logger.info(f"開始寫入內勤 PDF: {internal_pdf_path}")
-                pdf_writer.create_report(
-                    internal_attendance, year, month,
-                    internal_pdf_path, "internal"
-                )
-                logger.info("內勤 PDF 寫入完成")
-            
-            if external_attendance:
-                external_filename = format_filename(params.external_pdf_pattern, year, month)
-                external_pdf_path = pdf_dir / external_filename
-                logger.info(f"開始寫入外勤 PDF: {external_pdf_path}")
-                pdf_writer.create_report(
-                    external_attendance, year, month,
-                    external_pdf_path, "external"
-                )
-                logger.info("外勤 PDF 寫入完成")
-        else:
-            # Generate combined PDF
-            combined_filename = format_filename(params.pdf_filename_pattern, year, month)
-            combined_pdf_path = pdf_dir / combined_filename
-            logger.info(f"開始寫入合併 PDF: {combined_pdf_path}")
-            pdf_writer.create_combined_report(
-                internal_attendance, external_attendance,
-                year, month, combined_pdf_path
-            )
-            logger.info("合併 PDF 寫入完成")
+        # Generate combined PDF (internal + external in one file)
+        combined_filename = format_filename(params.pdf_filename_pattern, year, month)
+        combined_pdf_path = pdf_dir / combined_filename
+        logger.info(f"開始寫入合併 PDF: {combined_pdf_path}")
+        
+        pdf_writer.create_combined_report(
+            internal_attendance,
+            external_attendance,
+            year, month,
+            combined_pdf_path,
+            holidays=params.holidays
+        )
+        logger.info("合併 PDF 寫入完成")
     
     @staticmethod
     def build_params_from_config(

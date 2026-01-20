@@ -87,7 +87,7 @@ class UIPrefs:
 class OutputSettings:
     """Output settings for generated report."""
     output_dir: str = ""  # Default empty = project root
-    filename_pattern: str = "Attendance_{year}_{month}.xlsx"
+    filename_pattern: str = "高成(總公司)_{year}年{month}月出勤紀錄表.xlsx"
     generate_pdf: bool = True  # 預設開啟
     
     # 輸出排序設定
@@ -297,7 +297,7 @@ class ConfigManager:
         output_settings_data = data.get("output_settings", {})
         output_settings = OutputSettings(
             output_dir=output_settings_data.get("output_dir", ""),
-            filename_pattern=output_settings_data.get("filename_pattern", "Attendance_{year}_{month}.xlsx"),
+            filename_pattern=output_settings_data.get("filename_pattern", "高成(總公司)_{year}年{month}月出勤紀錄表.xlsx"),
             generate_pdf=output_settings_data.get("generate_pdf", True),
             sort_by=output_settings_data.get("sort_by", "attendance_rate"),
             separate_pdf=output_settings_data.get("separate_pdf", True),

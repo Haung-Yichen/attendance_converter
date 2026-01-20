@@ -225,6 +225,12 @@ class PdfWriter:
     
     THIN_LINE = 0.2
     THICK_LINE = 0.6
+    
+    # Legend dimensions
+    LEGEND_ROW_HEIGHT = 4
+    LEGEND_ROWS = 10  # 1 header + 5 colors + 1 spacer + 1 header + 2 symbols
+    LEGEND_PADDING = 5
+    LEGEND_TOTAL_HEIGHT = LEGEND_ROW_HEIGHT * LEGEND_ROWS + LEGEND_PADDING
 
     def __init__(
         self,
@@ -284,6 +290,8 @@ class PdfWriter:
         # Internal Staff Section
         if internal_list:
             pdf.add_page()
+            # Draw legend on first page only (top right)
+            self._draw_legend(pdf)
             self._draw_section(
                 pdf, internal_list, year, month,
                 section_title="【內勤】",
@@ -363,7 +371,12 @@ class PdfWriter:
         pdf.set_font(pdf.font_family_name, '', 14)
         pdf.set_text_color(0, 0, 0)
         pdf.cell(0, 10, section_title, new_x='LMARGIN', new_y='NEXT', align='C')
-        pdf.ln(3)
+        
+        # On first page, add extra space below title to avoid legend overlap
+        if pdf.page_no() == 1:
+            pdf.ln(self.LEGEND_TOTAL_HEIGHT + 5)
+        else:
+            pdf.ln(3)
 
         # Store layout info for drawing methods
         layout = {
@@ -466,7 +479,13 @@ class PdfWriter:
         merged_h = row_h * 2  # Height for merged cells
 
         # Check if we need a new page
-        if y_start + merged_h > self.PAGE_HEIGHT - 15:
+        # On page 1, reserve extra space at bottom for legend
+        if pdf.page_no() == 1:
+            bottom_limit = self.PAGE_HEIGHT - self.MARGIN - self.LEGEND_TOTAL_HEIGHT
+        else:
+            bottom_limit = self.PAGE_HEIGHT - 15
+        
+        if y_start + merged_h > bottom_limit:
             pdf.add_page()
             y_start = pdf.get_y() + 5
 
@@ -480,30 +499,54 @@ class PdfWriter:
             in_values.append((in_text, in_color))
             out_values.append((out_text, out_color))
 
-        # Calculate remarks
+        # Calculate remarks (standardized format)
         late_count = 0
         early_count = 0
+        missing_count = 0
         overtime_count = 0
+        absent_count = 0
 
         for day in work_days:
             record = records_by_day.get(day)
+            
             if not record:
+                # No record for a work day = Absent
+                absent_count += 1
                 continue
+            
+            has_in = record.check_in is not None
+            has_out = record.check_out is not None
+            
+            # Absent: record exists but no punches at all
+            if not has_in and not has_out:
+                absent_count += 1
+                continue
+            
+            # Missing Punch: only one punch present
+            if has_in and not has_out:
+                missing_count += 1
+            elif not has_in and has_out:
+                missing_count += 1
+            
+            # Late / Early / Abnormal
             if record.status == AttendanceStatus.LATE:
                 late_count += 1
             elif record.status == AttendanceStatus.EARLY_LEAVE:
                 early_count += 1
-            if record.check_out and record.remark == "下班延遲打卡":
+            elif record.status == AttendanceStatus.ABNORMAL:
+                # ABNORMAL = both Late AND Early
+                late_count += 1
+                early_count += 1
+            
+            # Overtime (delayed checkout)
+            if has_out and record.remark == "下班延遲打卡":
                 overtime_count += 1
 
-        remark_parts = []
-        if late_count > 0:
-            remark_parts.append(f"遲到{late_count}天")
-        if early_count > 0:
-            remark_parts.append(f"早退{early_count}天")
-        if overtime_count > 0:
-            remark_parts.append(f"超時{overtime_count}天")
-        remarks_text = ", ".join(remark_parts)
+        # Construct standardized remarks string (always show all counts)
+        remarks_text = (
+            f"遲到:{late_count},早退:{early_count},"
+            f"漏打卡:{missing_count},超時打卡:{overtime_count},曠職:{absent_count}"
+        )
 
         x = start_x
 
@@ -542,11 +585,11 @@ class PdfWriter:
             x += day_w
 
         # ─────────────────────────────────────────────────────────────────────
-        # 3. Remarks column (merged, vertically centered)
+        # 3. Remarks column (merged, vertically centered, with text wrapping)
         # ─────────────────────────────────────────────────────────────────────
         self._draw_merged_cell(
             pdf, x, y_start, remarks_w, merged_h, remarks_text,
-            is_left=False, is_right=False, font_size=9, align='L'
+            is_left=False, is_right=False, font_size=7, align='L', wrap_text=True
         )
         x += remarks_w
 
@@ -582,7 +625,8 @@ class PdfWriter:
         is_right: bool = False,
         font_size: int = 9,
         align: str = 'C',
-        fill_color: Optional[Tuple[int, int, int]] = None
+        fill_color: Optional[Tuple[int, int, int]] = None,
+        wrap_text: bool = False
     ) -> None:
         """Draw a merged cell spanning two rows with vertically centered text."""
         # Fill background
@@ -610,12 +654,26 @@ class PdfWriter:
         else:
             pdf.set_text_color(0, 0, 0)
 
-        # Draw text vertically centered
+        # Draw text
         pdf.set_font(pdf.font_family_name, '', font_size)
-        text_h = font_size * 0.35  # Approximate text height in mm
-        text_y = y + (height - text_h) / 2
-        pdf.set_xy(x, text_y)
-        pdf.cell(width, text_h, text, align=align)
+        
+        if wrap_text:
+            # Use multi_cell for text wrapping
+            # Calculate approximate line height
+            line_h = font_size * 0.4
+            # Split text by comma to create natural break points
+            wrapped_text = text.replace(',', ',\n')
+            # Count lines
+            lines = wrapped_text.count('\n') + 1
+            total_text_h = line_h * lines
+            text_y = y + (height - total_text_h) / 2
+            pdf.set_xy(x + 1, text_y)  # Small padding
+            pdf.multi_cell(width - 2, line_h, wrapped_text, align=align)
+        else:
+            text_h = font_size * 0.35  # Approximate text height in mm
+            text_y = y + (height - text_h) / 2
+            pdf.set_xy(x, text_y)
+            pdf.cell(width, text_h, text, align=align)
 
     def _draw_cell_with_border(
         self,
@@ -751,6 +809,107 @@ class PdfWriter:
             return self.COLORS['yellow']
         else:
             return self.COLORS['red']
+    
+    def _draw_legend(self, pdf: AttendancePdf) -> None:
+        """
+        在頁面右下方繪製顏色/符號說明圖例。
+        
+        Args:
+            pdf: AttendancePdf instance
+        """
+        # 顏色圖例定義: (顏色名稱, 顏色key, 狀態說明)
+        color_items = [
+            ("綠色", "green", "正常"),
+            ("黃色", "yellow", "出席率警告"),
+            ("紅色", "red", "遲到/早退"),
+            ("橘色", "orange", "漏打卡"),
+            ("灰色", "gray", "請假"),
+        ]
+        
+        # 符號圖例定義: (符號, 說明)
+        symbol_items = [
+            ("-", "缺勤"),
+            ("*", "漏打卡"),
+        ]
+        
+        # 圖例尺寸 (縮小版)
+        row_height = 4
+        col1_width = 20  # 顏色/符號欄
+        col2_width = 22  # 狀態欄
+        legend_width = col1_width + col2_width
+        
+        # 計算總圖例高度 (顏色表頭 + 顏色內容 + 空行 + 符號表頭 + 符號內容)
+        total_legend_rows = 1 + len(color_items) + 1 + 1 + len(symbol_items)
+        total_legend_height = row_height * total_legend_rows
+        
+        # 圖例位置：右上角 (header 下方)
+        legend_x = self.PAGE_WIDTH - self.MARGIN - legend_width
+        legend_y = 25  # 在標題下方固定位置
+        
+        # 儲存當前位置
+        old_x, old_y = pdf.get_x(), pdf.get_y()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 1. 顏色說明表頭
+        # ─────────────────────────────────────────────────────────────────────
+        pdf.set_font(pdf.font_family_name, '', 6)
+        pdf.set_fill_color(200, 200, 200)
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.set_xy(legend_x, legend_y)
+        pdf.cell(col1_width, row_height, "顏色說明", border=1, align='C', fill=True)
+        pdf.set_xy(legend_x + col1_width, legend_y)
+        pdf.cell(col2_width, row_height, "狀態", border=1, align='C', fill=True)
+        
+        # 顏色圖例內容
+        for i, (color_name, color_key, status) in enumerate(color_items):
+            y = legend_y + row_height * (i + 1)
+            
+            # 顏色名稱欄 (帶填充色)
+            rgb = self.COLORS.get(color_key, (255, 255, 255))
+            pdf.set_fill_color(*rgb)
+            if self._is_fill_dark(rgb):
+                pdf.set_text_color(255, 255, 255)
+            else:
+                pdf.set_text_color(0, 0, 0)
+            pdf.set_xy(legend_x, y)
+            pdf.cell(col1_width, row_height, color_name, border=1, align='C', fill=True)
+            
+            # 狀態欄 (白底)
+            pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_xy(legend_x + col1_width, y)
+            pdf.cell(col2_width, row_height, status, border=1, align='C', fill=True)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 2. 符號說明表頭 (在顏色說明下方，空一行)
+        # ─────────────────────────────────────────────────────────────────────
+        symbol_start_y = legend_y + row_height * (len(color_items) + 2)
+        
+        pdf.set_fill_color(200, 200, 200)
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.set_xy(legend_x, symbol_start_y)
+        pdf.cell(col1_width, row_height, "符號說明", border=1, align='C', fill=True)
+        pdf.set_xy(legend_x + col1_width, symbol_start_y)
+        pdf.cell(col2_width, row_height, "狀態", border=1, align='C', fill=True)
+        
+        # 符號圖例內容
+        for i, (symbol, status) in enumerate(symbol_items):
+            y = symbol_start_y + row_height * (i + 1)
+            
+            # 符號欄 (白底)
+            pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_xy(legend_x, y)
+            pdf.cell(col1_width, row_height, symbol, border=1, align='C', fill=True)
+            
+            # 狀態欄
+            pdf.set_xy(legend_x + col1_width, y)
+            pdf.cell(col2_width, row_height, status, border=1, align='C', fill=True)
+        
+        # 恢復位置
+        pdf.set_xy(old_x, old_y)
 
 
 # ==============================================================================

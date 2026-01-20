@@ -322,34 +322,57 @@ class ExcelWriter:
                     self._apply_absent_color(out_cell)
             
             # Generate remarks based on status (only for work days)
+            # Counters for standardized format
             late_count = 0
             early_count = 0
+            missing_count = 0
             overtime_count = 0
+            absent_count = 0
             
             for day in work_days:
                 record = records_by_day.get(day)
+                
                 if not record:
+                    # No record for a work day = Absent
+                    absent_count += 1
                     continue
                 
+                has_in = record.check_in is not None
+                has_out = record.check_out is not None
+                
+                # Absent: record exists but no punches at all
+                if not has_in and not has_out:
+                    absent_count += 1
+                    continue
+                
+                # Missing Punch: only one punch present
+                if has_in and not has_out:
+                    missing_count += 1
+                elif not has_in and has_out:
+                    missing_count += 1
+                
+                # Late / Early / Abnormal
                 if record.status == AttendanceStatus.LATE:
                     late_count += 1
                 elif record.status == AttendanceStatus.EARLY_LEAVE:
                     early_count += 1
+                elif record.status == AttendanceStatus.ABNORMAL:
+                    # ABNORMAL = both Late AND Early
+                    late_count += 1
+                    early_count += 1
                 
-                if record.check_out and record.remark == "下班延遲打卡":
+                # Overtime (delayed checkout)
+                if has_out and record.remark == "下班延遲打卡":
                     overtime_count += 1
             
-            # Construct remarks string
-            remark_parts = []
-            if late_count > 0:
-                remark_parts.append(f"遲到{late_count}天")
-            if early_count > 0:
-                remark_parts.append(f"早退{early_count}天")
-            if overtime_count > 0:
-                remark_parts.append(f"超時打卡{overtime_count}天")
+            # Construct standardized remarks string (always show all counts)
+            remarks_str = (
+                f"遲到:{late_count},早退:{early_count},"
+                f"漏打卡:{missing_count},超時打卡:{overtime_count},曠職:{absent_count}"
+            )
             
             # Remarks cell
-            remark_cell = ws.cell(in_row, remarks_col, ", ".join(remark_parts))
+            remark_cell = ws.cell(in_row, remarks_col, remarks_str)
             remark_cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
             remark_cell.border = self.BORDER
             ws.cell(out_row, remarks_col).border = self.BORDER
@@ -392,6 +415,9 @@ class ExcelWriter:
         
         # Set header row height for rotated date text
         ws.row_dimensions[1].height = 50
+        
+        # Add color legend (bottom-right of data)
+        self._add_color_legend(ws, current_row + 1, rate_col)
     
     def _apply_status_colors(self, in_cell, out_cell, record: AttendanceRecord):
         """Apply colors based on attendance status and color_logic settings."""
@@ -515,3 +541,80 @@ class ExcelWriter:
                 left=self.THICK_SIDE if col == 1 else self.THIN_SIDE,
                 right=self.THICK_SIDE if col == last_col else self.THIN_SIDE
             )
+    
+    def _add_color_legend(self, ws, start_row: int, anchor_col: int):
+        """
+        在工作表右下方（資料區塊旁邊）加入顏色說明表格。
+        
+        Args:
+            ws: Worksheet
+            start_row: 開始列號
+            anchor_col: 圖例的右側對齊欄號（資料表的最後一欄）
+        """
+        # 圖例定義: (顏色名稱, 填充色, 狀態說明)
+        legend_items = [
+            ("綠色", "green", "正常"),
+            ("黃色", "yellow", "出席率警告"),
+            ("紅色", "red", "遲到/早退"),
+            ("橘色", "orange", "漏打卡"),
+            ("灰色", "gray", "請假"),
+        ]
+        
+        # 符號圖例定義: (符號, 說明)
+        symbol_items = [
+            ("-", "缺勤"),
+            ("*", "漏打卡"),
+        ]
+        
+        # 圖例欄位：使用 anchor_col - 1 和 anchor_col
+        legend_col1 = anchor_col - 1
+        legend_col2 = anchor_col
+        
+        # 顏色說明表頭
+        header_row = start_row + 1
+        ws.cell(header_row, legend_col1, "顏色說明").font = Font(bold=True)
+        ws.cell(header_row, legend_col1).alignment = Alignment(horizontal='center')
+        ws.cell(header_row, legend_col1).border = self.BORDER
+        ws.cell(header_row, legend_col2, "狀態").font = Font(bold=True)
+        ws.cell(header_row, legend_col2).alignment = Alignment(horizontal='center')
+        ws.cell(header_row, legend_col2).border = self.BORDER
+        
+        # 顏色圖例內容
+        for i, (color_name, color_key, status) in enumerate(legend_items):
+            row = header_row + 1 + i
+            
+            # 顏色名稱欄 (帶填充色)
+            color_cell = ws.cell(row, legend_col1, color_name)
+            color_cell.fill = self.COLORS[color_key]
+            color_cell.alignment = Alignment(horizontal='center')
+            color_cell.border = self.BORDER
+            
+            # 狀態說明欄
+            status_cell = ws.cell(row, legend_col2, status)
+            status_cell.alignment = Alignment(horizontal='center')
+            status_cell.border = self.BORDER
+        
+        # 符號說明表頭 (在顏色說明下方，空一行)
+        symbol_header_row = header_row + len(legend_items) + 2
+        ws.cell(symbol_header_row, legend_col1, "符號說明").font = Font(bold=True)
+        ws.cell(symbol_header_row, legend_col1).alignment = Alignment(horizontal='center')
+        ws.cell(symbol_header_row, legend_col1).border = self.BORDER
+        ws.cell(symbol_header_row, legend_col2, "狀態").font = Font(bold=True)
+        ws.cell(symbol_header_row, legend_col2).alignment = Alignment(horizontal='center')
+        ws.cell(symbol_header_row, legend_col2).border = self.BORDER
+        
+        # 符號圖例內容
+        for i, (symbol, status) in enumerate(symbol_items):
+            row = symbol_header_row + 1 + i
+            
+            # 符號欄
+            symbol_cell = ws.cell(row, legend_col1, symbol)
+            symbol_cell.alignment = Alignment(horizontal='center')
+            symbol_cell.border = self.BORDER
+            
+            # 狀態說明欄
+            status_cell = ws.cell(row, legend_col2, status)
+            status_cell.alignment = Alignment(horizontal='center')
+            status_cell.border = self.BORDER
+
+

@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
         # Output path row
         output_layout.addWidget(QLabel("輸出路徑"), 0, 0)
         self.output_path_edit = QLineEdit()
-        self.output_path_edit.setPlaceholderText("Attendance_{year}_{month}.xlsx")
+        self.output_path_edit.setPlaceholderText("高成(總公司)_{year}年{month}月出勤紀錄表.xlsx")
         self.output_path_edit.setReadOnly(True)  # Read only, use browse button
         output_layout.addWidget(self.output_path_edit, 0, 1)
         
@@ -519,7 +519,7 @@ class MainWindow(QMainWindow):
         config.ui_prefs.rate_threshold = self.rate_threshold.value()
         
         # Output settings - parse path back into dir + filename
-        output_path = Path(self.output_path_edit.text()) if self.output_path_edit.text() else Path.cwd() / "Attendance_{year}_{month}.xlsx"
+        output_path = Path(self.output_path_edit.text()) if self.output_path_edit.text() else Path.cwd() / "高成(總公司)_{year}年{month}月出勤紀錄表.xlsx"
         config.output_settings.output_dir = str(output_path.parent)
         config.output_settings.filename_pattern = output_path.name
         config.output_settings.generate_pdf = self.chk_generate_pdf.isChecked()
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
             default_filename = Path(current_path).name
         else:
             start_dir = str(Path.cwd())
-            default_filename = "Attendance_{year}_{month}.xlsx"
+            default_filename = "高成(總公司)_{year}年{month}月出勤紀錄表.xlsx"
         
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -664,31 +664,23 @@ class MainWindow(QMainWindow):
             )
             return
         
-        # Parse date from source filename to format output path
-        year_month = FilenameParser.try_parse_report_date(Path(source_path).name)
+        # Use the output path from UI directly (already formatted by _process_source_file)
+        ui_output_path = self.output_path_edit.text().strip()
         
-        if year_month:
-            year, month = year_month
+        if ui_output_path:
+            output_path = ui_output_path
         else:
-            # Fallback to current date if parsing fails
-            now = datetime.now()
-            year, month = now.year, now.month
+            # Fallback: generate from config if UI is empty
+            year_month = FilenameParser.try_parse_report_date(Path(source_path).name)
             
-        # Generate output path using config settings
-        output_dir = self.config.output_settings.output_dir or str(Path.cwd())
-        filename_pattern = self.config.output_settings.filename_pattern
-        
-        try:
-            # Construct full path and format with year/month
-            # Handle MM with leading zero
-            full_pattern = Path(output_dir) / filename_pattern
-            output_path = str(full_pattern).format(
-                year=year, 
-                month=f"{month:02d}"
-            )
-        except Exception as e:
-            self._show_message_box("warning", "路徑格式錯誤", f"無法格式化輸出路徑：\n{str(e)}\n\n將使用預設檔名。")
-            output_path = str(Path(output_dir) / f"Attendance_{year}_{month:02d}.xlsx")
+            if year_month:
+                year, month = year_month
+            else:
+                now = datetime.now()
+                year, month = now.year, now.month
+            
+            output_dir = self.config.output_settings.output_dir or str(Path.cwd())
+            output_path = str(Path(output_dir) / f"高成(總公司)_{year}年{month:02d}月出勤紀錄表.xlsx")
             
         # Ensure output directory exists
         try:
@@ -1024,6 +1016,39 @@ class MainWindow(QMainWindow):
             # Update UI
             self.lbl_required_days.setText(str(required_days))
             self.lbl_holidays.setText(str(stats.holidays))
+            
+            # Auto-update output filename based on year/month
+            output_dir = self.config.output_settings.output_dir or str(Path.cwd())
+            filename_pattern = self.config.output_settings.filename_pattern
+            
+            # Try to format with placeholders first
+            if '{year}' in filename_pattern or '{month}' in filename_pattern:
+                try:
+                    formatted_filename = filename_pattern.format(
+                        year=year,
+                        month=f"{month:02d}"
+                    )
+                    new_output_path = str(Path(output_dir) / formatted_filename)
+                    self.output_path_edit.setText(new_output_path)
+                except (KeyError, ValueError):
+                    pass
+            else:
+                # Try to replace hardcoded year/month patterns (e.g., 2025_11 -> 2025_12)
+                # Pattern: 4-digit year followed by _ and 2-digit month
+                import re
+                pattern = r'(\d{4})_(\d{2})'
+                new_filename = re.sub(pattern, f'{year}_{month:02d}', filename_pattern, count=1)
+                if new_filename != filename_pattern:
+                    new_output_path = str(Path(output_dir) / new_filename)
+                    self.output_path_edit.setText(new_output_path)
+                else:
+                    # Try Chinese year/month format (e.g., 2025年11月 or 2025年 11月)
+                    cn_pattern = r'(\d{4})年\s*(\d{1,2})月'
+                    cn_new_filename = re.sub(cn_pattern, f'{year}年{month:02d}月', filename_pattern, count=1)
+                    if cn_new_filename != filename_pattern:
+                        new_output_path = str(Path(output_dir) / cn_new_filename)
+                        self.output_path_edit.setText(new_output_path)
+                    # else: No pattern matched, keep filename as-is (don't append year_month)
     
     def _generate_report(self, source_path: Path, output_path: Path) -> List[str]:
         """Generate the attendance report (Deprecated - use AttendanceReportService).

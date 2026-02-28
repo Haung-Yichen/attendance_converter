@@ -163,9 +163,15 @@ class SettingsDialog(QDialog):
         row += 1
         
         # Abnormal check-out color
-        layout.addWidget(QLabel("異常下班打卡標記"), row, 0)
+        layout.addWidget(QLabel("異常下班打卡標記 (遲到)"), row, 0)
         self.cmb_abnormal_out = self._create_color_combo()
         layout.addWidget(self.cmb_abnormal_out, row, 1)
+        row += 1
+        
+        # Early leave color (New)
+        layout.addWidget(QLabel("早退打卡標記"), row, 0)
+        self.cmb_early_leave = self._create_color_combo()
+        layout.addWidget(self.cmb_early_leave, row, 1)
         row += 1
         
         # Missing punch color and text
@@ -293,6 +299,7 @@ class SettingsDialog(QDialog):
         self._set_combo_value(self.cmb_normal_out, cl.normal_out_color)
         self._set_combo_value(self.cmb_abnormal_in, cl.abnormal_in_color)
         self._set_combo_value(self.cmb_abnormal_out, cl.abnormal_out_color)
+        self._set_combo_value(self.cmb_early_leave, getattr(cl, 'early_leave_color', 'red'))
         self._set_combo_value(self.cmb_missing_punch, cl.missing_punch_color)
         self._set_combo_value(self.cmb_absent, cl.absent_color)
         
@@ -321,6 +328,7 @@ class SettingsDialog(QDialog):
         cl.normal_out_color = self._get_combo_value(self.cmb_normal_out)
         cl.abnormal_in_color = self._get_combo_value(self.cmb_abnormal_in)
         cl.abnormal_out_color = self._get_combo_value(self.cmb_abnormal_out)
+        cl.early_leave_color = self._get_combo_value(self.cmb_early_leave)
         cl.missing_punch_color = self._get_combo_value(self.cmb_missing_punch)
         cl.absent_color = self._get_combo_value(self.cmb_absent)
         

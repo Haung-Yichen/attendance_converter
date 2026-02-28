@@ -24,6 +24,7 @@ class ColorLogic:
     normal_out_color: str = "green"      # 正常下班打卡顏色
     abnormal_in_color: str = "red"       # 異常上班打卡顏色
     abnormal_out_color: str = "red"      # 異常下班打卡顏色
+    early_leave_color: str = "red"       # 早退打卡顏色
     
     # 缺卡與曠職設定
     missing_punch_color: str = "orange"  # 當日缺少打卡紀錄顏色

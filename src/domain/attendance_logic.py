@@ -135,22 +135,29 @@ class InternalAttendanceStrategy(AttendanceStrategy):
             if record.check_in <= in_end:
                 # Normal check-in
                 if color_logic.green_normal_in:
-                    in_color = 'green'
+                    # 使用新的設定值，或預設 green
+                    in_color = color_logic.normal_in_color if hasattr(color_logic, 'normal_in_color') else 'green'
             else:
                 # Late check-in
                 if color_logic.red_abnormal_in:
-                    in_color = 'red'
+                    # 使用新的設定值，或預設 red
+                    in_color = color_logic.abnormal_in_color if hasattr(color_logic, 'abnormal_in_color') else 'red'
         
         # Check-out color
         if record.check_out is not None:
             if record.check_out >= out_start:
                 # Normal check-out
                 if color_logic.green_normal_out:
-                    out_color = 'green'
+                    out_color = color_logic.normal_out_color if hasattr(color_logic, 'normal_out_color') else 'green'
             else:
                 # Early check-out
+                # 優先使用 early_leave_color，若無則回退到 abnormal_out_color
+                early_color = getattr(color_logic, 'early_leave_color', None)
+                if not early_color:
+                    early_color = color_logic.abnormal_out_color if hasattr(color_logic, 'abnormal_out_color') else 'red'
+                
                 if color_logic.red_abnormal_out:
-                    out_color = 'red'
+                    out_color = early_color
         
         return (in_color, out_color)
     
@@ -217,10 +224,10 @@ class ExternalAttendanceStrategy(AttendanceStrategy):
         if record.check_in is not None:
             if record.check_in <= in_end:
                 if color_logic.green_normal_in:
-                    in_color = 'green'
+                    in_color = color_logic.normal_in_color if hasattr(color_logic, 'normal_in_color') else 'green'
             else:
                 if color_logic.red_abnormal_in:
-                    in_color = 'red'
+                    in_color = color_logic.abnormal_in_color if hasattr(color_logic, 'abnormal_in_color') else 'red'
         
         # Check-out color - modified logic
         # Post-noon is now considered NORMAL (Delayed), so use Green/Normal logic
@@ -228,7 +235,7 @@ class ExternalAttendanceStrategy(AttendanceStrategy):
             # Always apply normal color logic unless user wants special handling for overtime
             # Since "Delayed Check-out" for internal is usually Green, we do same here
             if color_logic.green_normal_out:
-                out_color = 'green'
+                out_color = color_logic.normal_out_color if hasattr(color_logic, 'normal_out_color') else 'green'
         
         return (in_color, out_color)
     

@@ -126,8 +126,8 @@ class AttendancePdf(FPDF):
     _font_loaded: bool = False
 
     def __init__(self, title: str = "", custom_font_path: Optional[str] = None):
-        # A3 Landscape: 420mm x 297mm
-        super().__init__(orientation='L', unit='mm', format='A3')
+        # A3 Portrait: 297mm x 420mm
+        super().__init__(orientation='P', unit='mm', format='A3')
         self.title_text = title
         self._setup_chinese_font(custom_font_path)
 
@@ -209,10 +209,10 @@ class PdfWriter:
         '#D3D3D3': 'gray', '#d3d3d3': 'gray',
     }
 
-    # Layout constants (mm) for A3 Landscape (420mm width)
-    MARGIN = 8
-    PAGE_WIDTH = 420
-    PAGE_HEIGHT = 297
+    # Layout constants (mm) for A3 Portrait (297mm width)
+    MARGIN = 5
+    PAGE_WIDTH = 297
+    PAGE_HEIGHT = 420
     
     NAME_COL_WIDTH = 22
     DAY_COL_WIDTH = 10.5
@@ -342,29 +342,33 @@ class PdfWriter:
         num_work_days = len(work_days)
 
         # ─────────────────────────────────────────────────────────────────────
-        # Dynamic layout calculation to fill the page width
+        # Dynamic layout calculation
         # ─────────────────────────────────────────────────────────────────────
         available_width = self.PAGE_WIDTH - 2 * self.MARGIN
-        
-        # Fixed column widths (scaled up for better readability)
-        name_col_width = 28
-        remarks_col_width = 38
-        actual_col_width = 20
-        rate_col_width = 18
+
+        # Adjusted widths for Portrait A3 (Total width limited to ~287mm)
+        name_col_width = 18
+        remarks_col_width = 45 
+        actual_col_width = 12
+        rate_col_width = 12
         
         fixed_cols_width = name_col_width + remarks_col_width + actual_col_width + rate_col_width
         
         # Calculate day column width to fill remaining space
         remaining_width = available_width - fixed_cols_width
-        day_col_width = remaining_width / num_work_days if num_work_days > 0 else 12
+        if num_work_days > 0:
+            day_col_width = remaining_width / num_work_days
+        else:
+            day_col_width = 10
+            
+        # Ensure minimum width to avoid unreadable text (font size might need reduction if < 9mm)
+        # But in Portrait we must fit within page, so we accept whatever width we get
+        # and adjust content drawing if needed.
         
-        # Ensure minimum day column width
-        day_col_width = max(day_col_width, 10)
-        
-        # Calculate actual table width
+        # Calculate actual table width (should match available_width exactly now)
         table_width = fixed_cols_width + day_col_width * num_work_days
         
-        # Center the table horizontally
+        # Center the table horizontally (should be negligible if filling width)
         start_x = (self.PAGE_WIDTH - table_width) / 2
 
         # Section title (centered)
@@ -410,7 +414,7 @@ class PdfWriter:
         remarks_w = layout['remarks_col_width']
         actual_w = layout['actual_col_width']
         rate_w = layout['rate_col_width']
-        header_h = 20  # Increased header height
+        header_h = 12  # Reduced header height to save space
 
         pdf.set_font(pdf.font_family_name, '', 8)
         pdf.set_fill_color(*self.COLORS['header'])
@@ -470,7 +474,7 @@ class PdfWriter:
         remarks_w = layout['remarks_col_width']
         actual_w = layout['actual_col_width']
         rate_w = layout['rate_col_width']
-        row_h = 10  # Increased row height for larger text
+        row_h = 7  # Reduced row height to save space (Standard A3 fits roughly 30-35 rows)
 
         records_by_day = {r.date.day: r for r in monthly.records}
         staff = monthly.staff
@@ -542,10 +546,11 @@ class PdfWriter:
             if has_out and record.remark == "下班延遲打卡":
                 overtime_count += 1
 
-        # Construct standardized remarks string (always show all counts)
+        # Construct standardized remarks string (cleaner alignment)
+        # Using simple spacing as PDF cells don't support complex tab stops easily
         remarks_text = (
-            f"遲到:{late_count},早退:{early_count},"
-            f"漏打卡:{missing_count},超時打卡:{overtime_count},曠職:{absent_count}"
+            f"遲到:{late_count}  早退:{early_count}  曠職:{absent_count}\n"
+            f"漏打卡:{missing_count}  超時:{overtime_count}"
         )
 
         x = start_x
@@ -587,9 +592,10 @@ class PdfWriter:
         # ─────────────────────────────────────────────────────────────────────
         # 3. Remarks column (merged, vertically centered, with text wrapping)
         # ─────────────────────────────────────────────────────────────────────
+        # Use font size 8 for better fit within compact height/width
         self._draw_merged_cell(
             pdf, x, y_start, remarks_w, merged_h, remarks_text,
-            is_left=False, is_right=False, font_size=7, align='L', wrap_text=True
+            is_left=False, is_right=False, font_size=8, align='L', wrap_text=True
         )
         x += remarks_w
 
@@ -660,14 +666,18 @@ class PdfWriter:
         if wrap_text:
             # Use multi_cell for text wrapping
             # Calculate approximate line height
-            line_h = font_size * 0.4
-            # Split text by comma to create natural break points
-            wrapped_text = text.replace(',', ',\n')
+            line_h = font_size * 0.5  # Slightly increased line height for readability
+            
+            # Use the text as-is (respecting newlines in the input)
+            wrapped_text = text
+            
             # Count lines
             lines = wrapped_text.count('\n') + 1
             total_text_h = line_h * lines
             text_y = y + (height - total_text_h) / 2
-            pdf.set_xy(x + 1, text_y)  # Small padding
+            
+            # Use X offset for padding
+            pdf.set_xy(x + 1, text_y)
             pdf.multi_cell(width - 2, line_h, wrapped_text, align=align)
         else:
             text_h = font_size * 0.35  # Approximate text height in mm

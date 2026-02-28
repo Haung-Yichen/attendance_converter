@@ -4,7 +4,7 @@ Rate Calculator Module
 Calculates attendance rates and determines color grading.
 """
 
-from datetime import date
+from datetime import date, time
 from calendar import monthrange
 from typing import List, Set
 
@@ -87,15 +87,58 @@ class RateCalculator:
             # 如果有指定工作日，只計算工作日的出勤
             if work_days is not None and record.date.day not in work_days:
                 continue
-            if record.status in (
-                AttendanceStatus.NORMAL,
-                AttendanceStatus.LATE,
-                AttendanceStatus.EARLY_LEAVE,
-                AttendanceStatus.ABNORMAL,
-                AttendanceStatus.LEAVE,
-            ):
+            
+            # 只要有打卡紀錄（不論遲到早退）或請假，都計入實際出勤
+            has_punch = record.check_in is not None or record.check_out is not None
+            if has_punch or record.status == AttendanceStatus.LEAVE:
                 actual += 1
         return actual
+    
+    def calculate_valid_days_for_rate(
+        self, 
+        records: List[AttendanceRecord],
+        work_days: Set[int] = None
+    ) -> int:
+        """
+        Calculate valid attendance days for attendance rate.
+        
+        Rules:
+        - NORMAL, LEAVE: Counted
+        - EARLY_LEAVE: Not Counted
+        - LATE: Not Counted
+        
+        Args:
+            records: List of attendance records
+            work_days: Optional set of day numbers (1-31) that are work days.
+            
+        Returns:
+            Number of days that count towards attendance rate
+        """
+        valid_count = 0
+        
+        for record in records:
+            # 如果有指定工作日，只計算工作日的出勤
+            if work_days is not None and record.date.day not in work_days:
+                continue
+            
+            # 判断是否計入出席
+            is_valid = False
+
+            # 正常(NORMAL), 請假(LEAVE) 算入出席率
+            # 修改規則：早退(EARLY_LEAVE) 不算入出席率
+            if record.status in (
+                AttendanceStatus.NORMAL,
+                AttendanceStatus.LEAVE
+            ):
+                is_valid = True
+            
+            # 修改規則：遲到(LATE) 不算入出席率 (移除 12:00 緩衝)
+            # 規則：超過上班打卡結束時間打卡 -> 不記入
+            
+            if is_valid:
+                valid_count += 1
+                
+        return valid_count
     
     def calculate_rate(
         self,
@@ -159,8 +202,16 @@ class RateCalculator:
             MonthlyAttendance with all calculations
         """
         required_days = self.calculate_required_days(staff, year, month)
+        
+        # 實際出勤天數 (顯示在 Excel 上，包含遲到)
         actual_days = self.calculate_actual_days(records, work_days=work_days)
-        rate = self.calculate_rate(actual_days, required_days)
+        
+        # 用於計算出席率的有效天數 (不包含遲到)
+        valid_days_for_rate = self.calculate_valid_days_for_rate(records, work_days=work_days)
+        
+        # 使用有效天數計算出席率
+        rate = self.calculate_rate(valid_days_for_rate, required_days)
+        
         rate_color = self.get_rate_color(rate, threshold)
         
         return MonthlyAttendance(

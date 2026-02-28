@@ -409,7 +409,7 @@ class ExcelWriter:
         ws.column_dimensions['A'].width = 12
         for col in range(2, num_work_days + 2):
             ws.column_dimensions[get_column_letter(col)].width = 7
-        ws.column_dimensions[get_column_letter(remarks_col)].width = 20
+        ws.column_dimensions[get_column_letter(remarks_col)].width = 65
         ws.column_dimensions[get_column_letter(actual_col)].width = 14
         ws.column_dimensions[get_column_letter(rate_col)].width = 8
         

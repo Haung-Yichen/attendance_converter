@@ -13,10 +13,16 @@ class FilenameParser:
     Parses 701Client export filenames.
     
     Expected format: MonRepyymmdd (e.g., MonRep251201 = December 2025)
+    Extended format: MonRepyymmdd_nnnnn_nnnnn_YYYYMM.xlsx
+      where the trailing _YYYYMM encodes the **data month**.
     """
     
     # Pattern: MonRep followed by 2-digit year, 2-digit month, 2-digit day
     PATTERN = re.compile(r'^MonRep(\d{2})(\d{2})(\d{2})')
+    
+    # Pattern: trailing _YYYYMM before the file extension
+    # e.g. MonRep250101_00000_00200_202512.xlsx → year=2025, month=12
+    DATA_MONTH_PATTERN = re.compile(r'_(\d{4})(\d{2})\.[^.]+$')
     
     @classmethod
     def parse_report_date(cls, filename: str) -> Tuple[int, int]:
@@ -64,3 +70,26 @@ class FilenameParser:
             return cls.parse_report_date(filename)
         except ValueError:
             return None
+
+    @classmethod
+    def try_parse_data_month(cls, filename: str) -> Optional[Tuple[int, int]]:
+        """
+        Extract the **data month** from the trailing ``_YYYYMM`` suffix.
+
+        This is the month the report *covers*, as opposed to the export
+        date encoded in the ``MonRepYYMMDD`` prefix.
+
+        Args:
+            filename: e.g. ``MonRep250101_00000_00200_202512.xlsx``
+
+        Returns:
+            ``(year, month)`` or ``None`` if the suffix is absent.
+        """
+        match = cls.DATA_MONTH_PATTERN.search(filename)
+        if not match:
+            return None
+        year = int(match.group(1))
+        month = int(match.group(2))
+        if not 1 <= month <= 12:
+            return None
+        return year, month

@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QListWidget, QCheckBox, QSpinBox, QPushButton, QLineEdit,
     QTimeEdit, QGroupBox, QFrame, QFileDialog, QMessageBox,
-    QApplication, QMenuBar, QMenu, QSplitter
+    QApplication, QMenuBar, QMenu, QSplitter, QProgressBar, QDialog,
+    QDialogButtonBox, QComboBox,
 )
 from PyQt6.QtCore import Qt, QTime
 from ui.styles import ThemeManager
@@ -26,6 +27,8 @@ from domain.staff_classifier import StaffClassifier
 from infrastructure.filename_parser import FilenameParser
 from infrastructure.excel_parser import ExcelFormatError, UnclassifiedStaffError
 from application.report_service import AttendanceReportService, ReportGenerationParams
+from application.annual_report_service import AnnualReportService, AnnualReportParams
+from ui.widgets.annual_report_worker import AnnualReportWorker
 
 
 class MainWindow(QMainWindow):
@@ -395,22 +398,40 @@ class MainWindow(QMainWindow):
         return group
     
     def _create_bottom_panel(self) -> QWidget:
-        """Create the bottom panel with action buttons."""
+        """Create the bottom panel with action buttons and progress bar."""
         panel = QWidget()
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(0, 10, 0, 0)
-        
-        layout.addStretch()
+        outer_layout = QVBoxLayout(panel)
+        outer_layout.setContentsMargins(0, 10, 0, 0)
+        outer_layout.setSpacing(6)
+
+        # Progress bar (hidden by default)
+        self.annual_progress_bar = QProgressBar()
+        self.annual_progress_bar.setRange(0, 100)
+        self.annual_progress_bar.setValue(0)
+        self.annual_progress_bar.setTextVisible(True)
+        self.annual_progress_bar.setFormat("%v / %m")
+        self.annual_progress_bar.setVisible(False)
+        outer_layout.addWidget(self.annual_progress_bar)
+
+        # Progress label (hidden by default)
+        self.annual_progress_label = QLabel("")
+        self.annual_progress_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        self.annual_progress_label.setVisible(False)
+        outer_layout.addWidget(self.annual_progress_label)
+
+        # Button row
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
         
         # Import leave list button
         self.btn_import_leave = QPushButton("匯入請假名單")
         self.btn_import_leave.setMinimumWidth(120)
-        layout.addWidget(self.btn_import_leave)
+        btn_layout.addWidget(self.btn_import_leave)
         
         # Select source file button
         self.btn_select_source = QPushButton("選擇檔案")
         self.btn_select_source.setMinimumWidth(100)
-        layout.addWidget(self.btn_select_source)
+        btn_layout.addWidget(self.btn_select_source)
         
         # Convert button
         self.btn_convert = QPushButton("轉換")
@@ -418,8 +439,21 @@ class MainWindow(QMainWindow):
         self.btn_convert.setStyleSheet(
             "background-color: #2ea043; color: white; font-weight: bold;"
         )
-        layout.addWidget(self.btn_convert)
+        btn_layout.addWidget(self.btn_convert)
+
+        # Annual report button
+        self.btn_annual_report = QPushButton("產生年度報表")
+        self.btn_annual_report.setMinimumWidth(120)
+        self.btn_annual_report.setStyleSheet(
+            "background-color: #0078d4; color: white; font-weight: bold;"
+        )
+        btn_layout.addWidget(self.btn_annual_report)
+
+        outer_layout.addLayout(btn_layout)
         
+        # Worker reference (to prevent GC)
+        self._annual_worker: Optional[AnnualReportWorker] = None
+
         return panel
     
     def _apply_styles(self):
@@ -448,6 +482,7 @@ class MainWindow(QMainWindow):
         self.btn_import_leave.clicked.connect(self._on_import_leave)
         self.btn_select_source.clicked.connect(self._on_select_source)
         self.btn_convert.clicked.connect(self._on_convert)
+        self.btn_annual_report.clicked.connect(self._on_annual_report)
         
         # Auto-save on settings change
         self.rate_threshold.valueChanged.connect(self._on_settings_changed)
@@ -1081,6 +1116,146 @@ class MainWindow(QMainWindow):
         self.lbl_internal_count.setText(str(stats.internal_count))
         self.lbl_external_count.setText(str(stats.external_count))
     
+    # ------------------------------------------------------------------ #
+    # Annual Report
+    # ------------------------------------------------------------------ #
+
+    def _on_annual_report(self) -> None:
+        """Handle click on '產生年度報表' button."""
+        # Pre-condition: staff CSV must be set
+        staff_csv_path = self.config.paths.staff_csv
+        if not staff_csv_path or not Path(staff_csv_path).exists():
+            self._show_message_box(
+                "warning", "警告",
+                "請先透過「檔案 → 匯入人員名單」設定人員名單。",
+            )
+            return
+
+        # Show year-selection dialog
+        year = self._ask_target_year()
+        if year is None:
+            return  # User cancelled
+
+        # Ask for search root directory
+        search_root = QFileDialog.getExistingDirectory(
+            self, "選擇 701Client 報表所在資料夾", str(Path.cwd()),
+        )
+        if not search_root:
+            return  # User cancelled
+
+        # Build output path – default to the same folder the user selected
+        # (config.output_dir may contain stale paths from a different machine)
+        output_dir = self.config.output_settings.output_dir
+        if not output_dir or not Path(output_dir).is_dir():
+            output_dir = search_root
+        output_path = Path(output_dir) / f"高成(總公司)_{year}年度出席率報表.xlsx"
+
+        # Ensure output directory exists
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            self._show_message_box("critical", "錯誤", f"無法建立輸出目錄：\n{exc}")
+            return
+
+        # Build params via the service helper
+        params = AnnualReportService.build_params(
+            self.config, year, Path(search_root), output_path,
+        )
+
+        # Show progress bar
+        self.annual_progress_bar.setValue(0)
+        self.annual_progress_bar.setVisible(True)
+        self.annual_progress_label.setText("準備中…")
+        self.annual_progress_label.setVisible(True)
+        self.btn_annual_report.setEnabled(False)
+
+        # Launch worker
+        self._annual_worker = AnnualReportWorker(params)
+        self._annual_worker.progress.connect(self._on_annual_progress)
+        self._annual_worker.warning.connect(self._on_annual_warning)
+        self._annual_worker.finished_result.connect(self._on_annual_finished)
+        self._annual_worker.start()
+
+    def _ask_target_year(self) -> Optional[int]:
+        """Open a small dialog to let the user pick a year."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("選擇目標年度")
+        dialog.setFixedSize(300, 120)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("請選擇要產生年度報表的年度："))
+
+        current_year = datetime.now().year
+        year_spin = QSpinBox()
+        year_spin.setRange(2000, 2099)
+        year_spin.setValue(current_year)
+        year_spin.setPrefix("民國 / 西元 ")
+        layout.addWidget(year_spin)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return year_spin.value()
+        return None
+
+    # ---- Slots for worker signals ---- #
+
+    def _on_annual_progress(self, current: int, total: int, message: str) -> None:
+        """Update the progress bar from the worker thread."""
+        self.annual_progress_bar.setRange(0, total)
+        self.annual_progress_bar.setValue(current)
+        self.annual_progress_label.setText(message)
+
+    def _on_annual_warning(self, message: str) -> None:
+        """Collect warnings emitted during annual processing."""
+        # For now just log; warnings are also collected in the result.
+        pass
+
+    def _on_annual_finished(self, result) -> None:
+        """Handle completion of the annual report worker."""
+        # Hide progress widgets
+        self.annual_progress_bar.setVisible(False)
+        self.annual_progress_label.setVisible(False)
+        self.btn_annual_report.setEnabled(True)
+
+        if not result.success:
+            self._show_message_box("critical", "錯誤", result.error_message)
+            return
+
+        # Build success / warning message
+        parts: list[str] = [
+            f"{result.year} 年度報表產生成功！",
+            f"\n已處理月份: {', '.join(str(m) for m in result.months_processed)}",
+            f"內勤: {result.internal_count} 人，外勤: {result.external_count} 人",
+        ]
+
+        if result.months_missing:
+            parts.append(
+                f"\n⚠ 缺少月份: {', '.join(str(m) for m in result.months_missing)}"
+            )
+
+        if result.warnings:
+            parts.append(f"\n⚠ 共 {len(result.warnings)} 項警告：")
+            for w in result.warnings[:10]:  # Limit display
+                parts.append(f"  • {w}")
+            if len(result.warnings) > 10:
+                parts.append(f"  …以及其他 {len(result.warnings) - 10} 項")
+
+        parts.append(f"\n報表位於：\n{result.output_path}")
+
+        msg_type = "warning" if result.warnings or result.months_missing else "information"
+        self._show_message_box(
+            msg_type,
+            "年度報表" if not result.warnings else "年度報表（含警告）",
+            "\n".join(parts),
+        )
+
     def closeEvent(self, event):
         """Handle window close - save config."""
         self._save_ui_to_config()
